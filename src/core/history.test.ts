@@ -11,7 +11,6 @@ import {
   historyPath,
   makeEntry,
   readHistory,
-  HISTORY_FILENAME,
   type HistoryEntry,
 } from "./history.js";
 
@@ -196,8 +195,8 @@ describe("formatShortDate", () => {
   });
 });
 
-describe("HISTORY_FILENAME", () => {
-  it("is the documented local-state filename", () => {
-    expect(HISTORY_FILENAME).toBe(".gardener-history.jsonl");
+describe("historyPath", () => {
+  it("points at the documented local-state file inside the given directory", () => {
+    expect(historyPath("/tmp/work")).toBe(join("/tmp/work", ".gardener-history.jsonl"));
   });
 });

@@ -30,14 +30,22 @@ function page(overrides: Partial<PageRecord>): PageRecord {
 }
 
 describe("detectFindings", () => {
-  it("flags untitled pages", () => {
-    const findings = detectFindings([page({ title: "   " })], { now: NOW });
-    expect(findings.some((f) => f.kind === "untitled")).toBe(true);
+  it("flags exactly the untitled page, not its titled sibling", () => {
+    const untitled = page({ title: "   " });
+    const titled = page({ title: "Real title" });
+    const findings = detectFindings([untitled, titled], { now: NOW });
+    const untitledFindings = findings.filter((f) => f.kind === "untitled");
+    expect(untitledFindings).toHaveLength(1);
+    expect(untitledFindings[0].page.id).toBe(untitled.id);
   });
 
-  it("flags empty pages", () => {
-    const findings = detectFindings([page({ hasChildren: false })], { now: NOW });
-    expect(findings.some((f) => f.kind === "empty")).toBe(true);
+  it("flags exactly the empty page, not one with content", () => {
+    const empty = page({ hasChildren: false });
+    const full = page({ hasChildren: true });
+    const findings = detectFindings([empty, full], { now: NOW });
+    const emptyFindings = findings.filter((f) => f.kind === "empty");
+    expect(emptyFindings).toHaveLength(1);
+    expect(emptyFindings[0].page.id).toBe(empty.id);
   });
 
   it("flags pages older than the stale window", () => {
@@ -47,12 +55,15 @@ describe("detectFindings", () => {
     const stale = findings.filter((f) => f.kind === "stale");
     expect(stale).toHaveLength(1);
     expect(stale[0].page.id).toBe(old.id);
+    expect(stale[0].detail).toContain("120 days ago");
   });
 
-  it("respects a custom stale window", () => {
-    const p = page({ lastEditedTime: new Date(NOW.getTime() - 20 * DAY) });
-    const findings = detectFindings([p], { now: NOW, staleDays: 14 });
-    expect(findings.some((f) => f.kind === "stale")).toBe(true);
+  it("treats the stale window as an exclusive boundary", () => {
+    const exact = page({ lastEditedTime: new Date(NOW.getTime() - 14 * DAY) });
+    const over = page({ lastEditedTime: new Date(NOW.getTime() - 14 * DAY - 1) });
+    const findings = detectFindings([exact, over], { now: NOW, staleDays: 14 });
+    const stale = findings.filter((f) => f.kind === "stale");
+    expect(stale.map((f) => f.page.id)).toEqual([over.id]);
   });
 
   it("groups duplicate titles case- and whitespace-insensitively", () => {
@@ -63,6 +74,24 @@ describe("detectFindings", () => {
     const dupes = findings.filter((f) => f.kind === "duplicate");
     expect(dupes).toHaveLength(2);
     expect(dupes[0].detail).toContain("2 times");
+  });
+
+  it("counts how many copies share a title", () => {
+    const copies = [
+      page({ title: "Roadmap" }),
+      page({ title: "roadmap" }),
+      page({ title: " ROADMAP " }),
+    ];
+    const dupes = detectFindings(copies, { now: NOW }).filter((f) => f.kind === "duplicate");
+    expect(dupes).toHaveLength(3);
+    expect(dupes[0].detail).toContain("3 times");
+  });
+
+  it("never groups untitled pages as duplicates", () => {
+    const a = page({ title: "" });
+    const b = page({ title: "   " });
+    const findings = detectFindings([a, b], { now: NOW });
+    expect(findings.filter((f) => f.kind === "duplicate")).toHaveLength(0);
   });
 
   it("ignores archived pages entirely", () => {
