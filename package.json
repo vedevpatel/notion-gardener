@@ -1,6 +1,6 @@
 {
   "name": "notion-gardener",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Audit a Notion workspace for stale, empty, untitled, and duplicate pages. Score its hygiene, then clean it up with your sign-off.",
   "type": "module",
   "bin": {
@@ -11,13 +11,16 @@
     "build": "tsc -p tsconfig.json",
     "scan": "tsx cli.ts scan",
     "fix": "tsx cli.ts fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "serve": "tsx mcp.ts"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@notionhq/client": "^2.2.15"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@notionhq/client": "^2.2.15",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

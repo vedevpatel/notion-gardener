@@ -11,6 +11,18 @@
     "declaration": true,
     "sourceMap": true
   },
-  "include": ["cli.ts", "notion.ts", "detectors.ts", "report.ts", "fix.ts"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": [
+    "cli.ts",
+    "mcp.ts",
+    "notion.ts",
+    "detectors.ts",
+    "report.ts",
+    "fix.ts",
+    "summarize.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ]
 }
