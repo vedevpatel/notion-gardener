@@ -7,12 +7,12 @@
     "notion-gardener": "./dist/cli.js"
   },
   "scripts": {
-    "dev": "tsx cli.ts",
+    "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
-    "scan": "tsx cli.ts scan",
-    "fix": "tsx cli.ts fix",
+    "scan": "tsx src/cli.ts scan",
+    "fix": "tsx src/cli.ts fix",
     "test": "vitest run",
-    "serve": "tsx mcp.ts"
+    "serve": "tsx src/integrations/mcp.ts"
   },
   "engines": {
     "node": ">=18"

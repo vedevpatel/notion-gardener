@@ -1,6 +1,6 @@
 import type { Finding, PageRecord } from "./detectors.js";
 import { affectedPages } from "./detectors.js";
-import { archivePage } from "./notion.js";
+import { archivePage } from "../integrations/notion.js";
 
 export interface FixOptions {
   /** Also archive stale pages. Untitled and empty pages are always included. */

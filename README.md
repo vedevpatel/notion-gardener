@@ -48,7 +48,7 @@ It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and 
   "mcpServers": {
     "notion-gardener": {
       "command": "npx",
-      "args": ["tsx", "/path/to/notion-gardener/mcp.ts"],
+      "args": ["tsx", "/path/to/notion-gardener/src/integrations/mcp.ts"],
       "env": { "NOTION_TOKEN": "secret_..." }
     }
   }
@@ -56,6 +56,23 @@ It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and 
 ```
 
 Archiving is reversible in Notion (they land in Trash), but the tool still treats every change as opt-in.
+
+## Project structure
+
+```
+src/
+  cli.ts                 # entry point: scan, fix, serve
+  core/
+    detectors.ts         # pure finding detection over page records
+    report.ts            # hygiene score + markdown/JSON rendering
+    fix.ts               # archive planning and confirmation flow
+  integrations/
+    notion.ts            # Notion API client
+    summarize.ts         # LLM cluster summaries (optional, keyless no-op)
+    mcp.ts               # MCP server over stdio
+```
+
+Tests sit next to what they cover (`*.test.ts`).
 
 ## How the score works
 

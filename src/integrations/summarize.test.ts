@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFindings, type Finding, type PageRecord } from "./detectors.js";
+import { detectFindings, type Finding, type PageRecord } from "../core/detectors.js";
 import {
   buildSummaryPrompt,
   clusterFindings,

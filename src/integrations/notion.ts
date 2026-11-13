@@ -1,6 +1,6 @@
 import { Client } from "@notionhq/client";
 import type { PageObjectResponse } from "@notionhq/client/build/src/api-endpoints.js";
-import type { PageRecord } from "./detectors.js";
+import type { PageRecord } from "../core/detectors.js";
 
 /** True when the page has at least one content block or subpage. */
 async function pageHasChildren(notion: Client, pageId: string): Promise<boolean> {

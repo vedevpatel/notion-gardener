@@ -2,9 +2,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { detectFindings, DEFAULT_STALE_DAYS, type FindingKind } from "./detectors.js";
+import { detectFindings, DEFAULT_STALE_DAYS, type FindingKind } from "../core/detectors.js";
 import { fetchWorkspacePages } from "./notion.js";
-import { renderJson, renderMarkdown, scoreWorkspace } from "./report.js";
+import { renderJson, renderMarkdown, scoreWorkspace } from "../core/report.js";
 
 function requireToken(): string {
   const token = process.env.NOTION_TOKEN;

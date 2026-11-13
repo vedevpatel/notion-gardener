@@ -1,4 +1,4 @@
-import type { Finding } from "./detectors.js";
+import type { Finding } from "../core/detectors.js";
 
 export interface Cluster {
   label: string;

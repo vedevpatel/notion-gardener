@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 import readline from "node:readline/promises";
-import { detectFindings, DEFAULT_STALE_DAYS } from "./detectors.js";
-import { fetchWorkspacePages } from "./notion.js";
-import { renderJson, renderMarkdown, scoreWorkspace } from "./report.js";
-import { applyArchives, planArchives } from "./fix.js";
+import { detectFindings, DEFAULT_STALE_DAYS } from "./core/detectors.js";
+import { fetchWorkspacePages } from "./integrations/notion.js";
+import { renderJson, renderMarkdown, scoreWorkspace } from "./core/report.js";
+import { applyArchives, planArchives } from "./core/fix.js";
 import {
   clusterFindings,
   renderClusterMarkdown,
   resolveLlmConfig,
   summarizeClusters,
   type ClusterSummary,
-} from "./summarize.js";
+} from "./integrations/summarize.js";
 
 interface Flags {
   json: boolean;
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "serve") {
-    const { serve } = await import("./mcp.js");
+    const { serve } = await import("./integrations/mcp.js");
     await serve();
     return;
   }
