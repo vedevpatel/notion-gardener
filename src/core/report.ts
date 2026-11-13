@@ -1,4 +1,9 @@
 import type { Finding, FindingKind, PageRecord } from "./detectors.js";
+import {
+  comparisonToJson,
+  renderComparisonMarkdown,
+  type DuplicateComparison,
+} from "./duplicates.js";
 
 /**
  * Hygiene score, 0-100. Penalties are weighted by how much each kind of
@@ -53,7 +58,8 @@ export function renderMarkdown(
   findings: Finding[],
   score: number,
   staleDays: number,
-  trend?: string | null
+  trend?: string | null,
+  duplicateDiffs?: DuplicateComparison[]
 ): string {
   const active = pages.filter((p) => !p.archived);
   const lines: string[] = [];
@@ -72,6 +78,13 @@ export function renderMarkdown(
       kind === "stale" ? `${KIND_HEADINGS[kind]} (>${staleDays} days)` : KIND_HEADINGS[kind];
     lines.push(`## ${heading} — ${group.length}`);
     lines.push("");
+    if (kind === "duplicate" && duplicateDiffs && duplicateDiffs.length > 0) {
+      // With diffs available, the section is grouped per title: what
+      // differs between the copies and a concrete suggestion, instead of
+      // a flat list that leaves the whole call to the reader.
+      for (const c of duplicateDiffs) lines.push(...renderComparisonMarkdown(c));
+      continue;
+    }
     for (const f of group.slice(0, LIST_LIMIT)) {
       const label = f.page.title.trim() || "(untitled)";
       lines.push(`- [${label}](${f.page.url}) — ${f.detail}`);
@@ -93,12 +106,14 @@ export function renderMarkdown(
 export function renderJson(
   pages: PageRecord[],
   findings: Finding[],
-  score: number
+  score: number,
+  duplicateDiffs?: DuplicateComparison[]
 ): string {
   return JSON.stringify(
     {
       pagesScanned: pages.filter((p) => !p.archived).length,
       score,
+      duplicates: (duplicateDiffs ?? []).map(comparisonToJson),
       findings: findings.map((f) => ({
         kind: f.kind,
         detail: f.detail,

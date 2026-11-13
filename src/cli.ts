@@ -90,7 +90,9 @@ Commands:
   scan     Audit the workspace and print a hygiene report: untitled, empty,
            stale and duplicate pages, plus orphaned pages (nothing links to
            them), dead external links, empty databases, and hollow pages
-           (no content, just comments). Every scan is appended to
+           (no content, just comments). Duplicates get a diff: what differs
+           between the copies and a suggestion for which to keep. Every
+           scan is appended to
            ${HISTORY_FILENAME} in the current directory, so the report can
            show how the score is trending.
   fix      Archive untitled, empty and orphaned pages. In a terminal this
@@ -100,7 +102,8 @@ Commands:
            (piped, or with --yes) it's a dry run unless --apply is given,
            and --apply asks for confirmation before changing anything.
            Duplicates, dead links, hollow pages and empty databases are
-           reported but never auto-archived.
+           reported but never auto-archived - run scan for the duplicate
+           diff and its keep/archive suggestion.
   history  Print recent scores from ${HISTORY_FILENAME}.
   serve    Run as an MCP server over stdio, so an agent (Claude, Cursor) can
            run the audit itself.
@@ -200,7 +203,7 @@ async function main(): Promise<void> {
       }
     }
     if (flags.json) {
-      const report = JSON.parse(renderJson(pages, findings, score));
+      const report = JSON.parse(renderJson(pages, findings, score, audit.duplicateDiffs));
       if (trend) report.trend = trend;
       if (summaries.length > 0) {
         report.clusters = summaries.map((c) => ({
@@ -212,7 +215,14 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    let out = renderMarkdown(pages, findings, score, flags.staleDays, trend);
+    let out = renderMarkdown(
+      pages,
+      findings,
+      score,
+      flags.staleDays,
+      trend,
+      audit.duplicateDiffs
+    );
     if (summaries.length > 0) {
       out += "\n" + renderClusterMarkdown(summaries).join("\n");
     }

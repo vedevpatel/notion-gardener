@@ -77,7 +77,7 @@ const fakeHttp = (async (url: unknown) => {
 }) as unknown as FetchLike;
 
 describe("auditWorkspace", () => {
-  it("runs every detector against the mocked workspace and scores it", async () => {
+  it("runs every detector against the mocked workspace and scores it exactly", async () => {
     const audit = await auditWorkspace("fake-token", {
       notion: buildWorkspace(),
       fetchImpl: fakeHttp,
@@ -102,8 +102,63 @@ describe("auditWorkspace", () => {
     expect(deadLink?.detail).not.toContain("alive.dev");
 
     expect(audit.warnings).toEqual([]);
-    expect(audit.score).toBeLessThan(100);
+    // untitled 5 + empty 3 + orphan 2*2 + hollow 1 + empty_database 2 + dead_link 1
+    expect(audit.score).toBe(100 - 5 - 3 - 4 - 1 - 2 - 1);
     expect(audit.databases).toHaveLength(1);
+    expect(audit.duplicateDiffs).toEqual([]);
+  });
+
+  it("diffs duplicate pages and suggests which copy to keep", async () => {
+    const notion = fakeNotion({
+      pages: [
+        notionPage({ id: "dup-new", title: "Meeting notes" }),
+        notionPage({ id: "dup-old", title: "meeting notes" }),
+      ],
+      blocks: {
+        "dup-new": [paragraph("agenda budget hiring roadmap")],
+        "dup-old": [paragraph("agenda budget hiring roadmap")],
+      },
+    });
+    const audit = await auditWorkspace("fake-token", { notion, fetchImpl: fakeHttp });
+    expect(audit.duplicateDiffs).toHaveLength(1);
+    const diff = audit.duplicateDiffs[0];
+    expect(diff.title).toBe("Meeting notes");
+    expect(diff.suggestion).toBe("keep_newest");
+    expect(diff.pages.map((p) => p.page.id)).toEqual(["dup-new", "dup-old"]);
+    // identical contents: no copy has unique words
+    expect(diff.pages.every((p) => p.uniqueWords.length === 0)).toBe(true);
+    expect(diff.pages[0].digest?.charCount).toBeGreaterThan(0);
+  });
+
+  it("warns and skips the hollow check when comment access is missing", async () => {
+    const notion = fakeNotion({
+      pages: [notionPage({ id: "p-hollow", title: "Deleted spec" })],
+      blocks: { "p-hollow": [] },
+      comments: "error",
+    });
+    const audit = await auditWorkspace("fake-token", { notion, fetchImpl: fakeHttp });
+    expect(audit.findings.some((f) => f.kind === "hollow")).toBe(false);
+    expect(audit.warnings).toHaveLength(1);
+    expect(audit.warnings[0]).toContain("comment");
+  });
+
+  it("caps the external links checked per run and says so", async () => {
+    // 11 pages x 50 urls = 550 unique links, over the 500 per-scan cap.
+    const pages = Array.from({ length: 11 }, (_, i) =>
+      notionPage({ id: `p${i}`, title: `Links ${i}` })
+    );
+    const blocks: Record<string, unknown[]> = {};
+    for (let i = 0; i < 11; i++) {
+      blocks[`p${i}`] = Array.from({ length: 50 }, (_, j) => ({
+        type: "bookmark",
+        bookmark: { url: `https://site-${i}-${j}.example/page` },
+      }));
+    }
+    const notion = fakeNotion({ pages, blocks });
+    const audit = await auditWorkspace("fake-token", { notion, fetchImpl: fakeHttp });
+    expect(audit.warnings.some((w) => w.includes("550") && w.includes("500"))).toBe(true);
+    // every checked link returned 200, so nothing is flagged
+    expect(audit.findings.some((f) => f.kind === "dead_link")).toBe(false);
   });
 
   it("skips the HTTP checks when checkExternalLinks is false", async () => {

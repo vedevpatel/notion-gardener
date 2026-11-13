@@ -26,7 +26,7 @@ export function createServer(): McpServer {
     {
       title: "Audit workspace",
       description:
-        "Scan the connected Notion workspace for stale, empty, untitled, duplicate and orphaned pages, dead links, empty databases and hollow pages, and return the full hygiene report.",
+        "Scan the connected Notion workspace for stale, empty, untitled, duplicate and orphaned pages, dead links, empty databases and hollow pages. Duplicate titles come with a diff of what differs between the copies and a suggestion for which to keep. Returns the full hygiene report.",
       inputSchema: {
         staleDays: z.number().int().positive().optional(),
         format: z.enum(["markdown", "json"]).optional(),
@@ -37,8 +37,15 @@ export function createServer(): McpServer {
       const audit = await auditWorkspace(requireToken(), { staleDays: days });
       const text =
         format === "json"
-          ? renderJson(audit.pages, audit.findings, audit.score)
-          : renderMarkdown(audit.pages, audit.findings, audit.score, days);
+          ? renderJson(audit.pages, audit.findings, audit.score, audit.duplicateDiffs)
+          : renderMarkdown(
+              audit.pages,
+              audit.findings,
+              audit.score,
+              days,
+              null,
+              audit.duplicateDiffs
+            );
       return { content: [{ type: "text", text }] };
     }
   );

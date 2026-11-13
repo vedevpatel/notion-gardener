@@ -5,6 +5,7 @@ import {
   type DatabaseRecord,
   type PageRecord,
 } from "../core/detectors.js";
+import { makeDigest, type ContentDigest } from "../core/duplicates.js";
 
 /**
  * The slice of the Notion client the audit uses. Structural, so tests can
@@ -211,11 +212,38 @@ async function listAllBlocks(notion: NotionLike, pageId: string): Promise<unknow
   return blocks;
 }
 
+/**
+ * Fingerprint a page's content for the duplicate diff: the text of every
+ * block (rich text and child page/database titles) plus the block-type
+ * mix. Same block shapes as extractBlockSignals.
+ */
+export function digestBlocks(blocks: unknown[]): ContentDigest {
+  const blockTypes: Record<string, number> = {};
+  const texts: string[] = [];
+  for (const raw of blocks as any[]) {
+    const type = raw?.type;
+    if (typeof type !== "string") continue;
+    blockTypes[type] = (blockTypes[type] ?? 0) + 1;
+    const body = raw[type];
+    if (!body || typeof body !== "object") continue;
+    if (Array.isArray(body.rich_text)) {
+      for (const rt of body.rich_text as any[]) {
+        if (typeof rt?.plain_text === "string") texts.push(rt.plain_text);
+      }
+    }
+    // child_page / child_database carry their title on the block itself.
+    if (typeof body.title === "string") texts.push(body.title);
+  }
+  return makeDigest(texts.join("\n"), blockTypes);
+}
+
 export interface WorkspaceSignals {
   /** Page id -> number of distinct other active pages that link to it. */
   inbound: Map<string, number>;
   /** Page id -> external URLs found in its content. */
   urlsByPage: Map<string, string[]>;
+  /** Page id -> content fingerprint, for the duplicate diff. */
+  digests: Map<string, ContentDigest>;
 }
 
 /**
@@ -235,15 +263,17 @@ export async function gatherSignals(
     page.hasChildren = blocks.length > 0;
     done++;
     onProgress?.(done, active.length);
-    return extractBlockSignals(blocks);
+    return { links: extractBlockSignals(blocks), digest: digestBlocks(blocks) };
   });
   const outbound = new Map<string, ReadonlySet<string>>();
   const urlsByPage = new Map<string, string[]>();
+  const digests = new Map<string, ContentDigest>();
   active.forEach((page, i) => {
-    outbound.set(page.id, signals[i].pageRefs);
-    if (signals[i].urls.length > 0) urlsByPage.set(page.id, signals[i].urls);
+    outbound.set(page.id, signals[i].links.pageRefs);
+    if (signals[i].links.urls.length > 0) urlsByPage.set(page.id, signals[i].links.urls);
+    digests.set(page.id, signals[i].digest);
   });
-  return { inbound: inboundLinkCounts(pages, outbound), urlsByPage };
+  return { inbound: inboundLinkCounts(pages, outbound), urlsByPage, digests };
 }
 
 /**

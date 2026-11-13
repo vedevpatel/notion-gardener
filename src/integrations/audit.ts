@@ -9,6 +9,7 @@ import {
   type PageRecord,
 } from "../core/detectors.js";
 import { scoreWorkspace } from "../core/report.js";
+import { diffDuplicates, type DuplicateComparison } from "../core/duplicates.js";
 import { checkLinks, type FetchLike } from "./linkcheck.js";
 import {
   clientFromToken,
@@ -41,6 +42,8 @@ export interface AuditResult {
   findings: Finding[];
   score: number;
   warnings: string[];
+  /** Per-title diff for duplicate pages: what differs and what to do about it. */
+  duplicateDiffs: DuplicateComparison[];
 }
 
 /** External links checked per run at most, to bound wall-clock time. */
@@ -62,6 +65,7 @@ export async function auditWorkspace(token: string, opts: AuditOptions = {}): Pr
 
   const findings = detectFindings(pages, { staleDays: opts.staleDays });
   findings.push(...detectOrphans(pages, signals.inbound));
+  const duplicateDiffs = diffDuplicates(pages, signals.digests);
 
   const databases = await fetchDatabases(notion, (done, total) =>
     opts.onProgress?.("databases", done, total)
@@ -99,5 +103,12 @@ export async function auditWorkspace(token: string, opts: AuditOptions = {}): Pr
     }
   }
 
-  return { pages, databases, findings, score: scoreWorkspace(findings), warnings };
+  return {
+    pages,
+    databases,
+    findings,
+    score: scoreWorkspace(findings),
+    warnings,
+    duplicateDiffs,
+  };
 }

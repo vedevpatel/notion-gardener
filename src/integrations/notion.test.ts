@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { PageRecord } from "../core/detectors.js";
 import {
+  digestBlocks,
   extractBlockSignals,
   fetchCommentCounts,
   fetchDatabases,
+  fetchWorkspacePages,
   gatherSignals,
+  mapPool,
   type NotionLike,
 } from "./notion.js";
 
@@ -255,5 +258,145 @@ describe("fetchCommentCounts", () => {
     const scan = await fetchCommentCounts(notion, [empty]);
     expect(scan.available).toBe(false);
     expect(scan.counts.size).toBe(0);
+  });
+});
+
+function rawPage(config: {
+  id: string;
+  title?: string;
+  parent?: Record<string, unknown>;
+  archived?: boolean;
+}): unknown {
+  return {
+    object: "page",
+    id: config.id,
+    properties: {
+      Name: { type: "title", title: [{ plain_text: config.title ?? "" }] },
+    },
+    url: `https://notion.so/${config.id}`,
+    parent: config.parent ?? { type: "workspace", workspace: true },
+    last_edited_time: "2026-11-01T00:00:00.000Z",
+    created_time: "2026-10-01T00:00:00.000Z",
+    archived: config.archived ?? false,
+  };
+}
+
+describe("fetchWorkspacePages", () => {
+  it("follows search pagination until has_more is false", async () => {
+    const cursors: (string | undefined)[] = [];
+    const notion = fakeNotion({});
+    notion.search = async (args) => {
+      cursors.push(args.start_cursor as string | undefined);
+      if (args.start_cursor === undefined) {
+        return {
+          results: [rawPage({ id: "p1", title: "One" })],
+          has_more: true,
+          next_cursor: "cursor-2",
+        };
+      }
+      return {
+        results: [rawPage({ id: "p2", title: "Two" })],
+        has_more: false,
+        next_cursor: null,
+      };
+    };
+    const pages = await fetchWorkspacePages(notion, { checkContent: false });
+    expect(pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(cursors).toEqual([undefined, "cursor-2"]);
+  });
+
+  it("maps titles, parents and timestamps from API shapes", async () => {
+    const notion = fakeNotion({
+      pages: [
+        rawPage({ id: "child", title: "Child page", parent: { type: "page_id", page_id: "root" } }),
+        rawPage({ id: "row", title: "Row", parent: { type: "database_id", database_id: "db1" } }),
+        rawPage({ id: "blockchild", title: "BC", parent: { type: "block_id", block_id: "b1" } }),
+      ],
+    });
+    const pages = await fetchWorkspacePages(notion, { checkContent: false });
+    const byId = new Map(pages.map((p) => [p.id, p]));
+    expect(byId.get("child")).toMatchObject({
+      title: "Child page",
+      parentType: "page_id",
+      parentId: "root",
+      url: "https://notion.so/child",
+      lastEditedTime: new Date("2026-11-01T00:00:00.000Z"),
+      createdTime: new Date("2026-10-01T00:00:00.000Z"),
+    });
+    expect(byId.get("row")).toMatchObject({ parentType: "database_id", parentId: "db1" });
+    expect(byId.get("blockchild")).toMatchObject({ parentType: "block_id", parentId: "b1" });
+  });
+
+  it("checks content only for active pages", async () => {
+    const contentChecks: string[] = [];
+    const notion = fakeNotion({
+      pages: [
+        rawPage({ id: "active", title: "Active" }),
+        rawPage({ id: "gone", title: "Gone", archived: true }),
+      ],
+      blocks: { active: [{ type: "paragraph", paragraph: { rich_text: [] } }], gone: [] },
+    });
+    const baseList = notion.blocks.children.list;
+    notion.blocks.children.list = async (args) => {
+      contentChecks.push(String(args.block_id));
+      return baseList(args);
+    };
+    const pages = await fetchWorkspacePages(notion);
+    const byId = new Map(pages.map((p) => [p.id, p]));
+    expect(byId.get("active")?.hasChildren).toBe(true);
+    // archived pages keep the default and never cost a content call
+    expect(byId.get("gone")?.hasChildren).toBe(true);
+    expect(contentChecks).toEqual(["active"]);
+  });
+});
+
+describe("mapPool", () => {
+  it("never exceeds the concurrency bound and preserves order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const items = Array.from({ length: 20 }, (_, i) => i);
+    const out = await mapPool(items, 3, async (i) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, (i % 3) + 1));
+      active--;
+      return i * 10;
+    });
+    expect(out).toEqual(items.map((i) => i * 10));
+    expect(maxActive).toBeLessThanOrEqual(3);
+    expect(maxActive).toBeGreaterThan(1); // actually pooled, not serial
+  });
+
+  it("returns an empty list for no items", async () => {
+    expect(await mapPool([], 3, async (x) => x)).toEqual([]);
+  });
+});
+
+describe("digestBlocks", () => {
+  it("counts block types and collects text from rich text and child titles", () => {
+    const digest = digestBlocks([
+      {
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{ type: "text", plain_text: "Launch plan draft" }],
+        },
+      },
+      {
+        type: "to_do",
+        to_do: { rich_text: [{ type: "text", plain_text: "email the team" }] },
+      },
+      { type: "child_page", child_page: { title: "Subpage title" } },
+    ]);
+    expect(digest.blockTypes).toEqual({ paragraph: 1, to_do: 1, child_page: 1 });
+    expect(digest.charCount).toBe("Launch plan draft\nemail the team\nSubpage title".length);
+    expect(digest.words.has("launch")).toBe(true);
+    expect(digest.words.has("subpage")).toBe(true);
+    expect(digest.preview).toContain("Launch plan draft");
+  });
+
+  it("handles malformed blocks without throwing", () => {
+    const digest = digestBlocks([{ noType: true }, { type: "paragraph" }, null, 42]);
+    expect(digest.blockTypes).toEqual({ paragraph: 1 });
+    expect(digest.charCount).toBe(0);
   });
 });

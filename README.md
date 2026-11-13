@@ -12,7 +12,8 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 - Optionally groups stale and duplicate findings into clusters and summarizes each cluster with an LLM, so "keep or kill" becomes a 30-second decision
 - Runs as an MCP server, so an agent in Claude or Cursor can run the audit itself
 - `fix` walks you through the plan page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
-- Duplicates are reported but never auto-archived. Which copy is the real one is a human's call. Dead links, hollow pages and empty databases are also flags only — read the comments, click the links, then decide.
+- **Duplicate titles come with a diff**: when pages share a title, the report shows what actually differs — last-edited dates, content length, block-type mix, words only one copy has — and a concrete suggestion (keep the newest, keep the one with content, or review by hand). Advisory only: duplicates are never auto-archived
+- Duplicates are reported but never auto-archived. Which copy is the real one is a human's call, and the diff makes that call quick. Dead links, hollow pages and empty databases are also flags only — read the comments, click the links, then decide.
 - Every scan is recorded in a local `.gardener-history.jsonl`, so the report shows the score's trend (`67 -> 94, +27 since Nov 12`) and `history` prints recent runs
 
 ## Setup
@@ -72,6 +73,7 @@ src/
   cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
   core/
     detectors.ts         # pure finding detection over page records (all eight kinds)
+    duplicates.ts        # duplicate diffing: what differs between same-title copies + suggestion
     report.ts            # hygiene score + markdown/JSON rendering
     fix.ts               # archive planning and confirmation flow
     interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
@@ -110,13 +112,23 @@ A "dead link" is an external URL in page content that returns 404 or 410. The ch
 
 A "hollow" page has no content but has comments — the page died and the discussion survived. It needs the integration to have comment access; without it, the scan says so and skips the check rather than guessing.
 
+## Duplicate diffs
+
+Two pages called "Meeting notes" used to mean an afternoon of clicking back and forth. The scan fingerprints every page's content while it reads blocks (text, block-type mix, significant words), so the duplicate section of the report shows, per shared title: which copy was edited most recently, how long each copy is, what kinds of blocks hold the content, and which words appear in only one copy. Then it suggests a call:
+
+- contents near-identical → keep the newest copy, archive the older one(s)
+- one copy empty → keep the one with content
+- both copies carry unique content → review by hand (the diff lists what's unique to each)
+
+The suggestion is advisory. `fix` never archives duplicates, whatever the diff says.
+
 ## Why I built it
 
 Every team I've worked in treats Notion as the system of record and then lets it decay until search is useless. The fix is always the same manual sweep someone does once a year. This is that sweep as a tool: run it in CI, run it before onboarding a new teammate, run it when search starts returning garbage.
 
 ## Roadmap
 
-Shipped: interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
+Shipped: interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
 
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)
@@ -128,6 +140,6 @@ Shipped: interactive fix walkthrough, score history with trends, smarter detecto
 npm test
 ```
 
-The detectors are pure functions over plain page records, and the Notion layer takes a structural client interface, so the whole pipeline — detection, link extraction, link checking, database and comment scans — is covered without touching the network.
+The detectors are pure functions over plain page records, and the Notion layer takes a structural client interface, so the whole pipeline — detection, duplicate diffing, link extraction, link checking, database and comment scans — is covered without touching the network. The suite is held to a simple bar: break the behavior a test names and that test must fail. No snapshot-of-whatever-the-code-does, no mocks so loose the code path isn't exercised.
 
 MIT license.
