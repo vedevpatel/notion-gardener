@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import readline from "node:readline/promises";
 import { DEFAULT_STALE_DAYS } from "./core/detectors.js";
+import { CONFIG_FILENAME, ConfigError, compileMatcher, loadConfig, resolveStaleDays } from "./core/config.js";
 import { auditWorkspace, type AuditPhase } from "./integrations/audit.js";
 import { renderJson, renderMarkdown } from "./core/report.js";
 import { applyArchives, planArchives } from "./core/fix.js";
@@ -33,7 +34,9 @@ interface Flags {
   interactive: boolean;
   yes: boolean;
   token?: string;
-  staleDays: number;
+  /** Only set when --stale-days is passed; flag > config > STALE_DAYS env > default. */
+  staleDays?: number;
+  config?: string;
 }
 
 function parseArgs(argv: string[]): { command: string; flags: Flags } {
@@ -45,7 +48,6 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     summarize: false,
     interactive: false,
     yes: false,
-    staleDays: Number(process.env.STALE_DAYS) || DEFAULT_STALE_DAYS,
   };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -56,7 +58,21 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     else if (arg === "--interactive") flags.interactive = true;
     else if (arg === "--yes") flags.yes = true;
     else if (arg === "--token") flags.token = rest[++i];
-    else if (arg === "--stale-days") flags.staleDays = Number(rest[++i]);
+    else if (arg === "--stale-days") {
+      const n = Number(rest[++i]);
+      if (!Number.isFinite(n) || n <= 0) {
+        console.error("--stale-days needs a positive number");
+        process.exit(2);
+      }
+      flags.staleDays = n;
+    } else if (arg === "--config") {
+      const value = rest[++i];
+      if (!value) {
+        console.error("--config needs a path");
+        process.exit(2);
+      }
+      flags.config = value;
+    }
     else {
       console.error(`Unknown flag: ${arg}`);
       process.exit(2);
@@ -81,8 +97,8 @@ function resolveToken(flags: Flags): string {
 const HELP = `notion-gardener — audit and clean up a Notion workspace
 
 Usage:
-  notion-gardener scan [--json] [--summarize] [--stale-days N]
-  notion-gardener fix  [--apply] [--include-stale] [--interactive] [--yes] [--stale-days N]
+  notion-gardener scan [--json] [--summarize] [--stale-days N] [--config PATH]
+  notion-gardener fix  [--apply] [--include-stale] [--interactive] [--yes] [--stale-days N] [--config PATH]
   notion-gardener history
   notion-gardener serve
 
@@ -113,6 +129,9 @@ Flags:
   --summarize       Add LLM summaries of stale/duplicate clusters (scan only;
                     needs OPENAI_API_KEY, silently skipped without one)
   --stale-days N    Days without an edit before a page counts as stale (default ${DEFAULT_STALE_DAYS})
+  --config PATH     Settings file (default: ./${CONFIG_FILENAME} if it exists). Sets staleDays,
+                    protectedPages (never flagged or archived) and ignore (findings dropped).
+                    --stale-days wins over the file.
   --include-stale   Let fix also archive stale pages
   --interactive     Force the page-by-page fix walkthrough, even when piped
   --yes             Skip the walkthrough and keep the scripted plan/confirm flow
@@ -161,6 +180,16 @@ async function main(): Promise<void> {
   }
 
   const token = resolveToken(flags);
+  let config;
+  try {
+    config = loadConfig(flags.config);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      console.error(err.message);
+      process.exit(2);
+    }
+    throw err;
+  }
   const phaseLabels: Record<AuditPhase, string> = {
     content: "Reading page content",
     databases: "Checking databases",
@@ -168,7 +197,8 @@ async function main(): Promise<void> {
     links: "Checking external links",
   };
   const audit = await auditWorkspace(token, {
-    staleDays: flags.staleDays,
+    config,
+    staleDays: resolveStaleDays(flags.staleDays, config, process.env.STALE_DAYS, DEFAULT_STALE_DAYS),
     // Dead links never feed the archive plan, so fix skips the HTTP checks.
     checkExternalLinks: command === "scan",
     onProgress: (phase, done, total) =>
@@ -219,9 +249,10 @@ async function main(): Promise<void> {
       pages,
       findings,
       score,
-      flags.staleDays,
+      audit.staleDays,
       trend,
-      audit.duplicateDiffs
+      audit.duplicateDiffs,
+      audit.suppressed
     );
     if (summaries.length > 0) {
       out += "\n" + renderClusterMarkdown(summaries).join("\n");
@@ -231,7 +262,10 @@ async function main(): Promise<void> {
   }
 
   // fix
-  const plan = planArchives(findings, { includeStale: flags.includeStale });
+  const plan = planArchives(findings, {
+    includeStale: flags.includeStale,
+    isProtected: compileMatcher(config.protectedPages),
+  });
   if (plan.length === 0) {
     console.log("Nothing to archive. Workspace is in good shape.");
     return;

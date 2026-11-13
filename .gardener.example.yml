@@ -1,0 +1,21 @@
+# Copy to .gardener.yml (or pass --config path/to/file.yml).
+# Every key is optional. Unknown keys are an error.
+
+# Days without an edit before a page counts as stale. Default 90.
+# The --stale-days flag wins over this.
+staleDays: 60
+
+# Pages the tool never touches: no findings from any detector, no part in
+# duplicate grouping, and refused again by `fix`. They still count as link
+# sources, so a protected index page keeps its targets from looking orphaned.
+protectedPages:
+  - Company handbook              # whole title, case-insensitive
+  - "Onboarding*"                 # * matches any run of characters
+  - 0123456789abcdef0123456789abcdef   # page or database ID (dashes optional)
+
+# Pages whose findings are dropped from the report, score and fix plan.
+# They are still analyzed, so an ignored page still counts as the twin of
+# a same-titled page (the other copy is still reported as a duplicate).
+ignore:
+  - "Scratch*"
+  - "Meeting notes 2023"

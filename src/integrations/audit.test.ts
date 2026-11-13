@@ -9,6 +9,7 @@ function notionPage(config: {
   id: string;
   title: string;
   parent?: Record<string, unknown>;
+  edited?: string;
 }): unknown {
   return {
     object: "page",
@@ -18,7 +19,7 @@ function notionPage(config: {
     },
     url: `https://notion.so/${config.id}`,
     parent: config.parent ?? { type: "workspace", workspace: true },
-    last_edited_time: NOW,
+    last_edited_time: config.edited ?? NOW,
     created_time: NOW,
     archived: false,
   };
@@ -174,5 +175,182 @@ describe("auditWorkspace", () => {
     });
     expect(fetched).toBe(0);
     expect(audit.findings.some((f) => f.kind === "dead_link")).toBe(false);
+  });
+});
+
+describe("auditWorkspace with a config", () => {
+  const cfg = (c: { staleDays?: number; protectedPages?: string[]; ignore?: string[] }) => ({
+    protectedPages: [],
+    ignore: [],
+    ...c,
+  });
+  const run = (config: ReturnType<typeof cfg>, extra: Record<string, unknown> = {}) =>
+    auditWorkspace("fake-token", {
+      notion: buildWorkspace(),
+      fetchImpl: fakeHttp,
+      config,
+      ...extra,
+    });
+  const kindsFor = (audit: Awaited<ReturnType<typeof run>>, id: string) =>
+    audit.findings.filter((f) => f.page.id === id).map((f) => f.kind).sort();
+
+  it("without a config nothing is suppressed", async () => {
+    const audit = await auditWorkspace("fake-token", {
+      notion: buildWorkspace(),
+      fetchImpl: fakeHttp,
+    });
+    expect(audit.suppressed).toEqual({ protected: 0, ignored: 0 });
+    expect(audit.staleDays).toBe(90);
+  });
+
+  it("a protected page gets no finding from any detector, and the score recovers", async () => {
+    const baseline = await run(cfg({}));
+    expect(kindsFor(baseline, "p-hollow")).toEqual(["empty", "hollow", "orphan"]);
+
+    const audit = await run(cfg({ protectedPages: ["p-hollow"] }));
+    expect(kindsFor(audit, "p-hollow")).toEqual([]);
+    // everything else is untouched
+    expect(kindsFor(audit, "p-untitled")).toEqual(["untitled"]);
+    expect(kindsFor(audit, "p-orphan")).toEqual(["orphan"]);
+    expect(kindsFor(audit, "p-links")).toEqual(["dead_link"]);
+    expect(audit.suppressed).toEqual({ protected: 3, ignored: 0 });
+    // empty 3 + orphan 2 + hollow 1 removed
+    expect(audit.score).toBe(baseline.score + 6);
+  });
+
+  it("protects by title pattern, case-insensitively", async () => {
+    const audit = await run(cfg({ protectedPages: ["FORGOTTEN *"] }));
+    expect(kindsFor(audit, "p-orphan")).toEqual([]);
+    expect(kindsFor(audit, "p-hollow")).toEqual(["empty", "hollow", "orphan"]);
+    expect(audit.suppressed.protected).toBe(1);
+  });
+
+  it("protects an untitled page by id", async () => {
+    const audit = await run(cfg({ protectedPages: ["p-untitled"] }));
+    expect(audit.findings.some((f) => f.kind === "untitled")).toBe(false);
+  });
+
+  it("protects an empty database", async () => {
+    const audit = await run(cfg({ protectedPages: ["Empty roadmap"] }));
+    expect(audit.findings.some((f) => f.kind === "empty_database")).toBe(false);
+    expect(audit.suppressed.protected).toBe(1);
+  });
+
+  it("a protected page still counts as a link source, so its targets are not orphans", async () => {
+    const notion = fakeNotion({
+      pages: [
+        notionPage({ id: "index", title: "Index" }),
+        notionPage({
+          id: "target",
+          title: "Target",
+          parent: { type: "page_id", page_id: "index" },
+        }),
+      ],
+      blocks: {
+        index: [{ type: "link_to_page", link_to_page: { type: "page_id", page_id: "target" } }],
+        target: [paragraph("content")],
+      },
+    });
+    const audit = await auditWorkspace("fake-token", {
+      notion,
+      fetchImpl: fakeHttp,
+      config: cfg({ protectedPages: ["Index"] }),
+    });
+    expect(audit.findings).toEqual([]);
+  });
+
+  it("protected pages do not take part in duplicate grouping", async () => {
+    const notion = fakeNotion({
+      pages: [
+        notionPage({ id: "a", title: "Meeting notes" }),
+        notionPage({ id: "b", title: "meeting notes" }),
+      ],
+      blocks: { a: [paragraph("budget")], b: [paragraph("budget")] },
+    });
+    const run2 = (config: ReturnType<typeof cfg>) =>
+      auditWorkspace("fake-token", { notion, fetchImpl: fakeHttp, config });
+    expect((await run2(cfg({}))).findings.filter((f) => f.kind === "duplicate")).toHaveLength(2);
+
+    const audit = await run2(cfg({ protectedPages: ["a"] }));
+    expect(audit.findings.filter((f) => f.kind === "duplicate")).toEqual([]);
+    expect(audit.duplicateDiffs).toEqual([]);
+  });
+
+  it("ignored pages lose their findings but still count as duplicate twins", async () => {
+    const notion = fakeNotion({
+      pages: [
+        notionPage({ id: "a", title: "Meeting notes" }),
+        notionPage({ id: "b", title: "meeting notes" }),
+      ],
+      blocks: { a: [paragraph("budget")], b: [paragraph("budget")] },
+    });
+    const audit = await auditWorkspace("fake-token", {
+      notion,
+      fetchImpl: fakeHttp,
+      config: cfg({ ignore: ["a"] }),
+    });
+    const dups = audit.findings.filter((f) => f.kind === "duplicate");
+    expect(dups.map((f) => f.page.id)).toEqual(["b"]);
+    expect(dups[0].detail).toContain("2 times");
+    expect(audit.suppressed).toEqual({ protected: 0, ignored: 1 });
+    // the diff survives because one copy is still reported
+    expect(audit.duplicateDiffs).toHaveLength(1);
+  });
+
+  it("drops the duplicate diff when every copy is ignored", async () => {
+    const notion = fakeNotion({
+      pages: [
+        notionPage({ id: "a", title: "Meeting notes" }),
+        notionPage({ id: "b", title: "meeting notes" }),
+      ],
+      blocks: { a: [paragraph("budget")], b: [paragraph("budget")] },
+    });
+    const audit = await auditWorkspace("fake-token", {
+      notion,
+      fetchImpl: fakeHttp,
+      config: cfg({ ignore: ["meeting notes"] }),
+    });
+    expect(audit.findings).toEqual([]);
+    expect(audit.duplicateDiffs).toEqual([]);
+    expect(audit.suppressed.ignored).toBe(2);
+  });
+
+  it("ignored findings leave the score; ignored dead links are dropped", async () => {
+    const baseline = await run(cfg({}));
+    const audit = await run(cfg({ ignore: ["Reading list"] }));
+    expect(audit.findings.some((f) => f.kind === "dead_link")).toBe(false);
+    expect(audit.score).toBe(baseline.score + 1);
+    expect(audit.suppressed).toEqual({ protected: 0, ignored: 1 });
+  });
+
+  describe("stale window", () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    const staleAudit = (extra: Record<string, unknown>) =>
+      auditWorkspace("fake-token", {
+        notion: fakeNotion({
+          pages: [notionPage({ id: "old", title: "Old plan", edited: daysAgo(45) })],
+          blocks: { old: [paragraph("x")] },
+        }),
+        fetchImpl: fakeHttp,
+        ...extra,
+      });
+    const staleCount = (a: Awaited<ReturnType<typeof staleAudit>>) =>
+      a.findings.filter((f) => f.kind === "stale").length;
+
+    it("config.staleDays tightens the window", async () => {
+      const a = await staleAudit({ config: cfg({ staleDays: 30 }) });
+      expect(staleCount(a)).toBe(1);
+      expect(a.staleDays).toBe(30);
+    });
+
+    it("without config the 90-day default applies", async () => {
+      expect(staleCount(await staleAudit({}))).toBe(0);
+    });
+
+    it("an explicit staleDays option beats the config", async () => {
+      const a = await staleAudit({ config: cfg({ staleDays: 30 }), staleDays: 60 });
+      expect(staleCount(a)).toBe(0);
+      expect(a.staleDays).toBe(60);
+    });
   });
 });

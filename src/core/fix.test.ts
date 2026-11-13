@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Finding, PageRecord } from "./detectors.js";
+import { compileMatcher } from "./config.js";
 import { planArchives } from "./fix.js";
 
 function pageFor(id: string): PageRecord {
@@ -49,5 +50,30 @@ describe("planArchives", () => {
       includeStale: false,
     });
     expect(plan).toHaveLength(1);
+  });
+
+  it("refuses protected pages even when a finding points at them", () => {
+    const findings = [
+      finding("untitled", "keep-me"),
+      finding("orphan", "keep-me"),
+      finding("empty", "other"),
+    ];
+    const plan = planArchives(findings, {
+      includeStale: true,
+      isProtected: compileMatcher(["keep-me"]),
+    });
+    expect(plan.map((p) => p.id)).toEqual(["other"]);
+  });
+
+  it("protects by title pattern too, and an empty protect list changes nothing", () => {
+    const findings = [finding("empty", "x"), finding("empty", "y")];
+    expect(
+      planArchives(findings, { includeStale: false, isProtected: compileMatcher(["page y"]) }).map(
+        (p) => p.id
+      )
+    ).toEqual(["x"]);
+    expect(
+      planArchives(findings, { includeStale: false, isProtected: compileMatcher([]) })
+    ).toHaveLength(2);
   });
 });

@@ -14,6 +14,7 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 - `fix` walks you through the plan page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
 - **Duplicate titles come with a diff**: when pages share a title, the report shows what actually differs — last-edited dates, content length, block-type mix, words only one copy has — and a concrete suggestion (keep the newest, keep the one with content, or review by hand). Advisory only: duplicates are never auto-archived
 - Duplicates are reported but never auto-archived. Which copy is the real one is a human's call, and the diff makes that call quick. Dead links, hollow pages and empty databases are also flags only — read the comments, click the links, then decide.
+- **Configurable per project**: a `.gardener.yml` sets the stale window, protects pages from ever being flagged or archived, and ignores noisy ones (see [Configuration](#configuration))
 - Every scan is recorded in a local `.gardener-history.jsonl`, so the report shows the score's trend (`67 -> 94, +27 since Nov 12`) and `history` prints recent runs
 
 ## Setup
@@ -31,6 +32,7 @@ npm install
 npm run scan                 # markdown report to stdout
 npm run scan -- --json       # machine-readable, pipe it wherever
 npm run scan -- --stale-days 30
+npm run scan -- --config team.yml   # settings file other than ./.gardener.yml
 
 npm run fix                  # interactive walkthrough in a terminal: archive/skip each page
 npm run fix -- --yes         # scripted mode: prints the archive plan, changes nothing
@@ -66,12 +68,43 @@ It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and 
 
 Archiving is reversible in Notion (they land in Trash), but the tool still treats every change as opt-in.
 
+## Configuration
+
+Drop a `.gardener.yml` in the directory you run the tool from (or pass `--config path/to/file.yml`). No file means the built-in defaults, with zero behavior change. A broken file is never silently ignored: invalid YAML, an unknown key, a wrong type, or a `--config` path that doesn't exist all stop the run with a clear error (exit code 2) before anything touches Notion.
+
+```yaml
+# .gardener.yml - every key optional (see .gardener.example.yml)
+staleDays: 60
+
+protectedPages:
+  - Company handbook                   # whole title, case-insensitive
+  - "Onboarding*"                      # * matches any run of characters
+  - 0123456789abcdef0123456789abcdef   # page or database ID, dashes optional
+
+ignore:
+  - "Scratch*"
+  - "Meeting notes 2023"
+```
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `staleDays` | positive integer | Days without an edit before a page is stale. Precedence: `--stale-days` flag, then this, then the `STALE_DAYS` env var, then 90. |
+| `protectedPages` | list of strings | Pages the tool never touches. |
+| `ignore` | list of strings | Pages whose findings are dropped. |
+
+Entries are IDs (32 hex characters, dashes optional) or title patterns. Titles match the whole title, case-insensitively, with `*` as a wildcard; `Wiki` does not match `Wiki 2025` but `Wiki*` does. Quote anything YAML could read as a number.
+
+**Protected vs ignored.** Protected pages are treated as if they weren't in the workspace for every detector: no untitled/empty/stale/orphan/dead-link/hollow/empty-database findings, and they don't take part in duplicate grouping. `fix` refuses them a second time at plan time, so even a bug upstream can't archive one. They still count as link sources, so a protected index page keeps the pages it links to from looking orphaned. Ignored pages are analyzed normally and then their findings are dropped from the report, score and fix plan; an ignored page is still the twin of a same-titled page, so the other copy is still reported as a duplicate. Use `protectedPages` for "never touch this", `ignore` for "stop nagging me about this".
+
+When the config hides anything, the report says so (`3 findings suppressed by config (2 on protected pages, 1 ignored)`), `--json` carries a `suppressed` object, and the MCP tools return it too. The MCP server reads `.gardener.yml` from its working directory, or the file named by the `GARDENER_CONFIG` env var; a `staleDays` argument to the tool wins over the file.
+
 ## Project structure
 
 ```
 src/
   cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
   core/
+    config.ts            # .gardener.yml: parsing, validation, protected/ignore matching
     detectors.ts         # pure finding detection over page records (all eight kinds)
     duplicates.ts        # duplicate diffing: what differs between same-title copies + suggestion
     report.ts            # hygiene score + markdown/JSON rendering
@@ -128,7 +161,7 @@ Every team I've worked in treats Notion as the system of record and then lets it
 
 ## Roadmap
 
-Shipped: interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
+Shipped: config file (`.gardener.yml`), interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
 
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)

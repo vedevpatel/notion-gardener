@@ -2,8 +2,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { DEFAULT_STALE_DAYS, type FindingKind } from "../core/detectors.js";
+import { type FindingKind } from "../core/detectors.js";
 import { auditWorkspace } from "./audit.js";
+import { loadConfig } from "../core/config.js";
 import { renderJson, renderMarkdown } from "../core/report.js";
 
 function requireToken(): string {
@@ -26,25 +27,27 @@ export function createServer(): McpServer {
     {
       title: "Audit workspace",
       description:
-        "Scan the connected Notion workspace for stale, empty, untitled, duplicate and orphaned pages, dead links, empty databases and hollow pages. Duplicate titles come with a diff of what differs between the copies and a suggestion for which to keep. Returns the full hygiene report.",
+        "Scan the connected Notion workspace for stale, empty, untitled, duplicate and orphaned pages, dead links, empty databases and hollow pages. Duplicate titles come with a diff of what differs between the copies and a suggestion for which to keep. Honors .gardener.yml (or the file named by GARDENER_CONFIG): custom stale window, protected pages and ignore list. Returns the full hygiene report.",
       inputSchema: {
         staleDays: z.number().int().positive().optional(),
         format: z.enum(["markdown", "json"]).optional(),
       },
     },
     async ({ staleDays, format }) => {
-      const days = staleDays ?? DEFAULT_STALE_DAYS;
-      const audit = await auditWorkspace(requireToken(), { staleDays: days });
+      const config = loadConfig(process.env.GARDENER_CONFIG);
+      const audit = await auditWorkspace(requireToken(), { staleDays, config });
+      const days = audit.staleDays;
       const text =
         format === "json"
-          ? renderJson(audit.pages, audit.findings, audit.score, audit.duplicateDiffs)
+          ? renderJson(audit.pages, audit.findings, audit.score, audit.duplicateDiffs, audit.suppressed)
           : renderMarkdown(
               audit.pages,
               audit.findings,
               audit.score,
               days,
               null,
-              audit.duplicateDiffs
+              audit.duplicateDiffs,
+              audit.suppressed
             );
       return { content: [{ type: "text", text }] };
     }
@@ -61,7 +64,8 @@ export function createServer(): McpServer {
       },
     },
     async ({ staleDays }) => {
-      const audit = await auditWorkspace(requireToken(), { staleDays });
+      const config = loadConfig(process.env.GARDENER_CONFIG);
+      const audit = await auditWorkspace(requireToken(), { staleDays, config });
       const byKind: Partial<Record<FindingKind, number>> = {};
       for (const f of audit.findings) {
         byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
@@ -70,6 +74,7 @@ export function createServer(): McpServer {
         score: audit.score,
         pagesScanned: audit.pages.filter((p) => !p.archived).length,
         findings: byKind,
+        suppressed: audit.suppressed,
       });
       return { content: [{ type: "text", text }] };
     }

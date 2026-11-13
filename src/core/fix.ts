@@ -1,10 +1,17 @@
 import type { Finding, PageRecord } from "./detectors.js";
 import { affectedPages } from "./detectors.js";
+import type { PageMatcher } from "./config.js";
 import { archivePage } from "../integrations/notion.js";
 
 export interface FixOptions {
   /** Also archive stale pages. Untitled and empty pages are always included. */
   includeStale: boolean;
+  /**
+   * Hard guard for protected pages (from .gardener.yml). The audit already
+   * keeps them out of the findings; this refuses them again here so no
+   * caller can plan an archive of a protected page.
+   */
+  isProtected?: PageMatcher;
 }
 
 /**
@@ -17,7 +24,10 @@ export interface FixOptions {
 export function planArchives(findings: Finding[], opts: FixOptions): PageRecord[] {
   const kinds: Finding["kind"][] = ["untitled", "empty", "orphan"];
   if (opts.includeStale) kinds.push("stale");
-  return affectedPages(findings.filter((f) => kinds.includes(f.kind)));
+  const { isProtected } = opts;
+  return affectedPages(findings.filter((f) => kinds.includes(f.kind))).filter(
+    (p) => !isProtected?.(p)
+  );
 }
 
 export interface ApplyResult {

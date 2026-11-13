@@ -1,4 +1,5 @@
 import type { Finding, FindingKind, PageRecord } from "./detectors.js";
+import type { Suppressed } from "./config.js";
 import {
   comparisonToJson,
   renderComparisonMarkdown,
@@ -59,7 +60,8 @@ export function renderMarkdown(
   score: number,
   staleDays: number,
   trend?: string | null,
-  duplicateDiffs?: DuplicateComparison[]
+  duplicateDiffs?: DuplicateComparison[],
+  suppressed?: Suppressed
 ): string {
   const active = pages.filter((p) => !p.archived);
   const lines: string[] = [];
@@ -69,6 +71,13 @@ export function renderMarkdown(
   lines.push(`- Hygiene score: **${score}/100**`);
   if (trend) lines.push(`- Trend: ${trend}`);
   lines.push(`- Findings: ${findings.length}`);
+  const hidden = (suppressed?.protected ?? 0) + (suppressed?.ignored ?? 0);
+  if (suppressed && hidden > 0) {
+    lines.push(
+      `- ${hidden} finding${hidden === 1 ? "" : "s"} suppressed by config ` +
+        `(${suppressed.protected} on protected pages, ${suppressed.ignored} ignored)`
+    );
+  }
   lines.push("");
 
   for (const kind of Object.keys(KIND_HEADINGS) as FindingKind[]) {
@@ -107,12 +116,17 @@ export function renderJson(
   pages: PageRecord[],
   findings: Finding[],
   score: number,
-  duplicateDiffs?: DuplicateComparison[]
+  duplicateDiffs?: DuplicateComparison[],
+  suppressed?: Suppressed
 ): string {
   return JSON.stringify(
     {
       pagesScanned: pages.filter((p) => !p.archived).length,
       score,
+      suppressed: {
+        protected: suppressed?.protected ?? 0,
+        ignored: suppressed?.ignored ?? 0,
+      },
       duplicates: (duplicateDiffs ?? []).map(comparisonToJson),
       findings: findings.map((f) => ({
         kind: f.kind,

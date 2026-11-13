@@ -189,3 +189,39 @@ describe("renderJson", () => {
     expect(report.duplicates[0].copies.map((c: { id: string }) => c.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("suppressed-by-config reporting", () => {
+  it("markdown shows the count and the split when something was suppressed", () => {
+    const md = renderMarkdown([pageFor("a")], [finding("stale")], 99, 90, null, undefined, {
+      protected: 2,
+      ignored: 1,
+    });
+    expect(md).toContain("- 3 findings suppressed by config (2 on protected pages, 1 ignored)");
+  });
+
+  it("uses the singular for exactly one", () => {
+    const md = renderMarkdown([pageFor("a")], [], 100, 90, null, undefined, {
+      protected: 0,
+      ignored: 1,
+    });
+    expect(md).toContain("- 1 finding suppressed by config");
+  });
+
+  it("is silent when nothing was suppressed", () => {
+    const none = renderMarkdown([pageFor("a")], [], 100, 90, null, undefined, {
+      protected: 0,
+      ignored: 0,
+    });
+    expect(none).not.toContain("suppressed");
+    expect(renderMarkdown([pageFor("a")], [], 100, 90)).not.toContain("suppressed");
+  });
+
+  it("json always carries the suppressed counts", () => {
+    const withCounts = JSON.parse(
+      renderJson([pageFor("a")], [], 100, undefined, { protected: 4, ignored: 5 })
+    );
+    expect(withCounts.suppressed).toEqual({ protected: 4, ignored: 5 });
+    const without = JSON.parse(renderJson([pageFor("a")], [], 100));
+    expect(without.suppressed).toEqual({ protected: 0, ignored: 0 });
+  });
+});
