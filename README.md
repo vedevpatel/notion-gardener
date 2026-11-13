@@ -5,25 +5,27 @@
 
 Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit next to the actual source of truth, and nobody can tell what's current. notion-gardener audits a workspace through the Notion API, scores its hygiene, and cleans up the dead weight — with your sign-off before anything gets archived.
 
+```bash
+npx notion-gardener scan
+```
+
+![notion-gardener scan demo](https://raw.githubusercontent.com/vedevpatel/notion-gardener/main/docs/demo.gif)
+
 ## What it does
 
 - Scans every page and database your integration can see, via the Notion search API
 - Flags eight kinds of rot: **untitled** pages, **empty** pages, **stale** pages (no edits in 90 days, configurable), **duplicate** titles, **orphaned** pages (nothing links to or mentions them — being a child in the sidebar tree doesn't count as a link), **dead links** (external URLs that return 404/410), **empty databases** (zero rows), and **hollow** pages (no content left, but an active comment thread)
-- Scores the workspace 0–100 and prints a markdown or JSON report
-- Optionally groups stale and duplicate findings into clusters and summarizes each cluster with an LLM, so "keep or kill" becomes a 30-second decision
+- Scores the workspace 0–100 and prints a markdown or JSON report. Every scan is recorded locally, so the report shows the trend (`67 -> 94, +27 since Nov 12`) instead of a one-off number
+- **Duplicate titles come with a diff**: what actually differs between the copies and a concrete suggestion for which to keep (see [Duplicate diffs](#duplicate-diffs))
+- `fix` walks you through the cleanup page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
+- `scan --html` writes a self-contained report page you can send anyone
+- Optionally groups stale and duplicate findings into clusters and summarizes each with an LLM, so "keep or kill" becomes a 30-second decision
 - Runs as an MCP server, so an agent in Claude or Cursor can run the audit itself
-- `fix` walks you through the plan page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
-- **Duplicate titles come with a diff**: when pages share a title, the report shows what actually differs — last-edited dates, content length, block-type mix, words only one copy has — and a concrete suggestion (keep the newest, keep the one with content, or review by hand). Advisory only: duplicates are never auto-archived
-- Duplicates are reported but never auto-archived. Which copy is the real one is a human's call, and the diff makes that call quick. Dead links, hollow pages and empty databases are also flags only — read the comments, click the links, then decide.
-- **Configurable per project**: a `.gardener.yml` sets the stale window, protects pages from ever being flagged or archived, and ignores noisy ones (see [Configuration](#configuration))
-- Every scan is recorded in a local `.gardener-history.jsonl`, so the report shows the score's trend (`67 -> 94, +27 since Nov 12`) and `history` prints recent runs
+- Configurable per project: a `.gardener.yml` sets the stale window, protects pages from ever being flagged or archived, and ignores noisy ones (see [Configuration](#configuration))
+
+Nothing is ever auto-archived. Duplicates, dead links, hollow pages and empty databases are flags only — the tool shows you what it found and a human makes the call.
 
 ## Setup
-
-```bash
-npx notion-gardener scan        # zero install
-# or: npm install -g notion-gardener
-```
 
 1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy the token.
 2. In Notion, share the top-level pages you want audited with the integration. Notion only shows an integration what you explicitly share — this is the step everyone forgets.
@@ -33,7 +35,7 @@ npx notion-gardener scan        # zero install
 ## Usage
 
 ```bash
-notion-gardener scan            # markdown report to stdout (npx notion-gardener scan without a global install)
+notion-gardener scan            # markdown report to stdout
 
 # from a clone: npm install, then npm run scan
 npm run scan -- --json       # machine-readable, pipe it wherever
@@ -57,27 +59,7 @@ Every scan appends one line to `.gardener-history.jsonl` in the current director
 
 `scan --html report.html` writes one self-contained file next to the markdown output: the score (color-coded by health), the trend, every finding grouped by kind, the duplicate diffs with their keep/archive suggestions, and how many findings your config suppressed. No scripts, no external assets, dark-mode aware — attach it to an email or drop it in a shared drive and it just opens. Titles and page content are escaped, so a weird page name can't break the page.
 
-### MCP server mode
-
-```bash
-npm run serve                # stdio MCP server
-```
-
-It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and `get_hygiene_score` (just the score and finding counts). Point a client at it, e.g. in Claude Desktop's config:
-
-```json
-{
-  "mcpServers": {
-    "notion-gardener": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/notion-gardener/src/integrations/mcp.ts"],
-      "env": { "NOTION_TOKEN": "secret_..." }
-    }
-  }
-}
-```
-
-Archiving is reversible in Notion (they land in Trash), but the tool still treats every change as opt-in.
+![HTML report](https://raw.githubusercontent.com/vedevpatel/notion-gardener/main/docs/report.png)
 
 ## Configuration
 
@@ -107,32 +89,29 @@ Entries are IDs (32 hex characters, dashes optional) or title patterns. Titles m
 
 **Protected vs ignored.** Protected pages are treated as if they weren't in the workspace for every detector: no untitled/empty/stale/orphan/dead-link/hollow/empty-database findings, and they don't take part in duplicate grouping. `fix` refuses them a second time at plan time, so even a bug upstream can't archive one. They still count as link sources, so a protected index page keeps the pages it links to from looking orphaned. Ignored pages are analyzed normally and then their findings are dropped from the report, score and fix plan; an ignored page is still the twin of a same-titled page, so the other copy is still reported as a duplicate. Use `protectedPages` for "never touch this", `ignore` for "stop nagging me about this".
 
-When the config hides anything, the report says so (`3 findings suppressed by config (2 on protected pages, 1 ignored)`), `--json` carries a `suppressed` object, and the MCP tools return it too. The MCP server reads `.gardener.yml` from its working directory, or the file named by the `GARDENER_CONFIG` env var; a `staleDays` argument to the tool wins over the file.
+When the config hides anything, the report says so (`3 findings suppressed by config (2 on protected pages, 1 ignored)`), `--json` carries a `suppressed` object, and the MCP tools return it too.
 
-## Project structure
+## MCP server mode
 
-```
-src/
-  cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
-  core/
-    config.ts            # .gardener.yml: parsing, validation, protected/ignore matching
-    detectors.ts         # pure finding detection over page records (all eight kinds)
-    duplicates.ts        # duplicate diffing: what differs between same-title copies + suggestion
-    report.ts            # hygiene score + markdown/JSON rendering
-    report-html.ts       # shareable single-file HTML report (scan --html)
-    fix.ts               # archive planning and confirmation flow
-    interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
-    history.ts           # score history: append/read .gardener-history.jsonl, trend line
-  integrations/
-    audit.ts             # the full pipeline: fetch, link graph, detectors, score
-    notion.ts            # Notion API client: pages, blocks, databases, comments
-    linkcheck.ts         # external link checker (HEAD with GET fallback, dead = 404/410 only)
-    prompt.ts            # interactive fix picker (arrow keys, line fallback)
-    summarize.ts         # LLM cluster summaries (optional, keyless no-op)
-    mcp.ts               # MCP server over stdio
+```bash
+npm run serve                # stdio MCP server
 ```
 
-Tests sit next to what they cover (`*.test.ts`).
+It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and `get_hygiene_score` (just the score and finding counts). Point a client at it, e.g. in Claude Desktop's config:
+
+```json
+{
+  "mcpServers": {
+    "notion-gardener": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/notion-gardener/src/integrations/mcp.ts"],
+      "env": { "NOTION_TOKEN": "secret_..." }
+    }
+  }
+}
+```
+
+The MCP server reads `.gardener.yml` from its working directory, or the file named by the `GARDENER_CONFIG` env var; a `staleDays` argument to the tool wins over the file. Archiving is reversible in Notion (they land in Trash), but the tool still treats every change as opt-in.
 
 ## How the score works
 
@@ -167,23 +146,46 @@ Two pages called "Meeting notes" used to mean an afternoon of clicking back and 
 
 The suggestion is advisory. `fix` never archives duplicates, whatever the diff says.
 
+## Development
+
+```bash
+npm install
+npm test                   # 193 tests
+npm run build
+```
+
+The detectors are pure functions over plain page records, and the Notion layer takes a structural client interface, so the whole pipeline — detection, duplicate diffing, link extraction, link checking, database and comment scans — is covered without touching the network. The suite is held to a simple bar: break the behavior a test names and that test must fail. No snapshot-of-whatever-the-code-does, no mocks so loose the code path isn't exercised.
+
+```
+src/
+  cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
+  core/
+    config.ts            # .gardener.yml: parsing, validation, protected/ignore matching
+    detectors.ts         # pure finding detection over page records (all eight kinds)
+    duplicates.ts        # duplicate diffing: what differs between same-title copies + suggestion
+    report.ts            # hygiene score + markdown/JSON rendering
+    report-html.ts       # shareable single-file HTML report (scan --html)
+    fix.ts               # archive planning and confirmation flow
+    interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
+    history.ts           # score history: append/read .gardener-history.jsonl, trend line
+  integrations/
+    audit.ts             # the full pipeline: fetch, link graph, detectors, score
+    notion.ts            # Notion API client: pages, blocks, databases, comments
+    linkcheck.ts         # external link checker (HEAD with GET fallback, dead = 404/410 only)
+    prompt.ts            # interactive fix picker (arrow keys, line fallback)
+    summarize.ts         # LLM cluster summaries (optional, keyless no-op)
+    mcp.ts               # MCP server over stdio
+```
+
+Tests sit next to what they cover (`*.test.ts`).
+
 ## Why I built it
 
 Every team I've worked in treats Notion as the system of record and then lets it decay until search is useless. The fix is always the same manual sweep someone does once a year. This is that sweep as a tool: run it in CI, run it before onboarding a new teammate, run it when search starts returning garbage.
 
 ## Roadmap
 
-Shipped: config file (`.gardener.yml`), interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, shareable HTML report (`scan --html`), LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
-
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)
-
-## Tests
-
-```bash
-npm test
-```
-
-The detectors are pure functions over plain page records, and the Notion layer takes a structural client interface, so the whole pipeline — detection, duplicate diffing, link extraction, link checking, database and comment scans — is covered without touching the network. The suite is held to a simple bar: break the behavior a test names and that test must fail. No snapshot-of-whatever-the-code-does, no mocks so loose the code path isn't exercised.
 
 MIT license.
