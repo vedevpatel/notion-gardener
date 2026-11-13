@@ -31,6 +31,7 @@ npm install
 
 npm run scan                 # markdown report to stdout
 npm run scan -- --json       # machine-readable, pipe it wherever
+npm run scan -- --html report.html   # also write a standalone HTML report you can send anyone
 npm run scan -- --stale-days 30
 npm run scan -- --config team.yml   # settings file other than ./.gardener.yml
 
@@ -45,6 +46,10 @@ npm run scan -- --summarize  # adds an LLM-written summary per stale/duplicate c
 ```
 
 Every scan appends one line to `.gardener-history.jsonl` in the current directory. It's local state, already in `.gitignore` — keep it out of version control.
+
+### Shareable HTML report
+
+`scan --html report.html` writes one self-contained file next to the markdown output: the score (color-coded by health), the trend, every finding grouped by kind, the duplicate diffs with their keep/archive suggestions, and how many findings your config suppressed. No scripts, no external assets, dark-mode aware — attach it to an email or drop it in a shared drive and it just opens. Titles and page content are escaped, so a weird page name can't break the page.
 
 ### MCP server mode
 
@@ -108,6 +113,7 @@ src/
     detectors.ts         # pure finding detection over page records (all eight kinds)
     duplicates.ts        # duplicate diffing: what differs between same-title copies + suggestion
     report.ts            # hygiene score + markdown/JSON rendering
+    report-html.ts       # shareable single-file HTML report (scan --html)
     fix.ts               # archive planning and confirmation flow
     interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
     history.ts           # score history: append/read .gardener-history.jsonl, trend line
@@ -161,11 +167,10 @@ Every team I've worked in treats Notion as the system of record and then lets it
 
 ## Roadmap
 
-Shipped: config file (`.gardener.yml`), interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
+Shipped: config file (`.gardener.yml`), interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), duplicate diffing with keep/archive suggestions, shareable HTML report (`scan --html`), LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
 
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)
-- Shareable HTML report built from the score history
 
 ## Tests
 

@@ -4,6 +4,7 @@ import { DEFAULT_STALE_DAYS } from "./core/detectors.js";
 import { CONFIG_FILENAME, ConfigError, compileMatcher, loadConfig, resolveStaleDays } from "./core/config.js";
 import { auditWorkspace, type AuditPhase } from "./integrations/audit.js";
 import { renderJson, renderMarkdown } from "./core/report.js";
+import { renderHtml, writeHtmlReport } from "./core/report-html.js";
 import { applyArchives, planArchives } from "./core/fix.js";
 import {
   appendHistory,
@@ -37,6 +38,8 @@ interface Flags {
   /** Only set when --stale-days is passed; flag > config > STALE_DAYS env > default. */
   staleDays?: number;
   config?: string;
+  /** Path for the standalone HTML report (scan only). */
+  html?: string;
 }
 
 function parseArgs(argv: string[]): { command: string; flags: Flags } {
@@ -72,6 +75,13 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
         process.exit(2);
       }
       flags.config = value;
+    } else if (arg === "--html") {
+      const value = rest[++i];
+      if (!value || value.startsWith("--")) {
+        console.error("--html needs a path");
+        process.exit(2);
+      }
+      flags.html = value;
     }
     else {
       console.error(`Unknown flag: ${arg}`);
@@ -97,7 +107,7 @@ function resolveToken(flags: Flags): string {
 const HELP = `notion-gardener — audit and clean up a Notion workspace
 
 Usage:
-  notion-gardener scan [--json] [--summarize] [--stale-days N] [--config PATH]
+  notion-gardener scan [--json] [--html PATH] [--summarize] [--stale-days N] [--config PATH]
   notion-gardener fix  [--apply] [--include-stale] [--interactive] [--yes] [--stale-days N] [--config PATH]
   notion-gardener history
   notion-gardener serve
@@ -126,6 +136,9 @@ Commands:
 
 Flags:
   --json            Machine-readable report (scan only)
+  --html PATH       Also write a standalone HTML report to PATH (scan only).
+                    One self-contained file - no scripts, no external assets -
+                    you can send anyone.
   --summarize       Add LLM summaries of stale/duplicate clusters (scan only;
                     needs OPENAI_API_KEY, silently skipped without one)
   --stale-days N    Days without an edit before a page counts as stale (default ${DEFAULT_STALE_DAYS})
@@ -176,6 +189,11 @@ async function main(): Promise<void> {
   if (command !== "scan" && command !== "fix") {
     console.error(`Unknown command: ${command}\n`);
     console.log(HELP);
+    process.exit(2);
+  }
+
+  if (flags.html && command !== "scan") {
+    console.error("--html only applies to scan");
     process.exit(2);
   }
 
@@ -231,6 +249,16 @@ async function main(): Promise<void> {
       } else {
         process.stderr.write("No OPENAI_API_KEY set - printing the plain report.\n");
       }
+    }
+    if (flags.html) {
+      const html = renderHtml(pages, findings, score, {
+        staleDays: audit.staleDays,
+        trend,
+        duplicateDiffs: audit.duplicateDiffs,
+        suppressed: audit.suppressed,
+      });
+      writeHtmlReport(flags.html, html);
+      process.stderr.write(`HTML report written to ${flags.html}\n`);
     }
     if (flags.json) {
       const report = JSON.parse(renderJson(pages, findings, score, audit.duplicateDiffs));
