@@ -9,8 +9,9 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 - Scores the workspace 0–100 and prints a markdown or JSON report
 - Optionally groups stale and duplicate findings into clusters and summarizes each cluster with an LLM, so "keep or kill" becomes a 30-second decision
 - Runs as an MCP server, so an agent in Claude or Cursor can run the audit itself
-- `fix` archives the untitled and empty pages — dry-run by default, and `--apply` still asks you to confirm before anything changes
+- `fix` walks you through the plan page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
 - Duplicates are reported but never auto-archived. Which copy is the real one is a human's call.
+- Every scan is recorded in a local `.gardener-history.jsonl`, so the report shows the score's trend (`67 -> 94, +27 since Nov 12`) and `history` prints recent runs
 
 ## Setup
 
@@ -28,12 +29,17 @@ npm run scan                 # markdown report to stdout
 npm run scan -- --json       # machine-readable, pipe it wherever
 npm run scan -- --stale-days 30
 
-npm run fix                  # prints the archive plan, changes nothing
-npm run fix -- --apply       # asks for "yes", then archives
-npm run fix -- --apply --include-stale   # also archives stale pages
+npm run fix                  # interactive walkthrough in a terminal: archive/skip each page
+npm run fix -- --yes         # scripted mode: prints the archive plan, changes nothing
+npm run fix -- --yes --apply # asks for "yes", then archives
+npm run fix -- --yes --apply --include-stale   # also archives stale pages
+
+npm run history              # recent scores from .gardener-history.jsonl
 
 npm run scan -- --summarize  # adds an LLM-written summary per stale/duplicate cluster
 ```
+
+Every scan appends one line to `.gardener-history.jsonl` in the current directory. It's local state, already in `.gitignore` — keep it out of version control.
 
 ### MCP server mode
 
@@ -61,13 +67,16 @@ Archiving is reversible in Notion (they land in Trash), but the tool still treat
 
 ```
 src/
-  cli.ts                 # entry point: scan, fix, serve
+  cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
   core/
     detectors.ts         # pure finding detection over page records
     report.ts            # hygiene score + markdown/JSON rendering
     fix.ts               # archive planning and confirmation flow
+    interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
+    history.ts           # score history: append/read .gardener-history.jsonl, trend line
   integrations/
     notion.ts            # Notion API client
+    prompt.ts            # interactive fix picker (arrow keys, line fallback)
     summarize.ts         # LLM cluster summaries (optional, keyless no-op)
     mcp.ts               # MCP server over stdio
 ```
@@ -93,10 +102,11 @@ Every team I've worked in treats Notion as the system of record and then lets it
 
 ## Roadmap
 
-Shipped: LLM summaries of stale clusters (`scan --summarize`) and MCP server mode (`serve`).
+Shipped: interactive fix walkthrough, score history with trends, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
 
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)
+- Shareable HTML report built from the score history
 
 ## Tests
 

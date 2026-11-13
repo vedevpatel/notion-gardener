@@ -5,6 +5,19 @@ import { fetchWorkspacePages } from "./integrations/notion.js";
 import { renderJson, renderMarkdown, scoreWorkspace } from "./core/report.js";
 import { applyArchives, planArchives } from "./core/fix.js";
 import {
+  appendHistory,
+  formatShortDate,
+  formatTrend,
+  makeEntry,
+  readHistory,
+  HISTORY_FILENAME,
+} from "./core/history.js";
+import {
+  buildWalkthroughItems,
+  walkthroughPlan,
+} from "./core/interactive.js";
+import { makeChooser } from "./integrations/prompt.js";
+import {
   clusterFindings,
   renderClusterMarkdown,
   resolveLlmConfig,
@@ -17,6 +30,8 @@ interface Flags {
   apply: boolean;
   includeStale: boolean;
   summarize: boolean;
+  interactive: boolean;
+  yes: boolean;
   token?: string;
   staleDays: number;
 }
@@ -28,6 +43,8 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     apply: false,
     includeStale: false,
     summarize: false,
+    interactive: false,
+    yes: false,
     staleDays: Number(process.env.STALE_DAYS) || DEFAULT_STALE_DAYS,
   };
   for (let i = 0; i < rest.length; i++) {
@@ -36,6 +53,8 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     else if (arg === "--apply") flags.apply = true;
     else if (arg === "--include-stale") flags.includeStale = true;
     else if (arg === "--summarize") flags.summarize = true;
+    else if (arg === "--interactive") flags.interactive = true;
+    else if (arg === "--yes") flags.yes = true;
     else if (arg === "--token") flags.token = rest[++i];
     else if (arg === "--stale-days") flags.staleDays = Number(rest[++i]);
     else {
@@ -63,16 +82,24 @@ const HELP = `notion-gardener — audit and clean up a Notion workspace
 
 Usage:
   notion-gardener scan [--json] [--summarize] [--stale-days N]
-  notion-gardener fix  [--apply] [--include-stale] [--stale-days N]
+  notion-gardener fix  [--apply] [--include-stale] [--interactive] [--yes] [--stale-days N]
+  notion-gardener history
   notion-gardener serve
 
 Commands:
-  scan   Audit the workspace and print a hygiene report.
-  fix    Archive untitled and empty pages. Dry-run unless --apply is given;
-         --apply always asks for confirmation before changing anything.
-         Duplicates are reported but never auto-archived.
-  serve  Run as an MCP server over stdio, so an agent (Claude, Cursor) can
-         run the audit itself.
+  scan     Audit the workspace and print a hygiene report. Every scan is
+           appended to ${HISTORY_FILENAME} in the current directory, so the
+           report can show how the score is trending.
+  fix      Archive untitled and empty pages. In a terminal this walks you
+           through the plan page by page - archive or skip each with the
+           arrow keys (a/s work too), enter confirms, q quits. Nothing is
+           archived that you didn't pick. Non-interactively (piped, or with
+           --yes) it's a dry run unless --apply is given, and --apply asks
+           for confirmation before changing anything.
+           Duplicates are reported but never auto-archived.
+  history  Print recent scores from ${HISTORY_FILENAME}.
+  serve    Run as an MCP server over stdio, so an agent (Claude, Cursor) can
+           run the audit itself.
 
 Flags:
   --json            Machine-readable report (scan only)
@@ -80,6 +107,8 @@ Flags:
                     needs OPENAI_API_KEY, silently skipped without one)
   --stale-days N    Days without an edit before a page counts as stale (default ${DEFAULT_STALE_DAYS})
   --include-stale   Let fix also archive stale pages
+  --interactive     Force the page-by-page fix walkthrough, even when piped
+  --yes             Skip the walkthrough and keep the scripted plan/confirm flow
   --token TOKEN     Notion integration token (or set NOTION_TOKEN)
 `;
 
@@ -94,6 +123,26 @@ async function main(): Promise<void> {
   if (command === "serve") {
     const { serve } = await import("./integrations/mcp.js");
     await serve();
+    return;
+  }
+
+  if (command === "history") {
+    const entries = readHistory();
+    if (entries.length === 0) {
+      console.log(`No scans recorded yet. Run a scan and it will append to ${HISTORY_FILENAME}.`);
+      return;
+    }
+    console.log(`Recent scores (${HISTORY_FILENAME}):`);
+    for (const e of entries.slice(-20)) {
+      const c = e.counts;
+      console.log(
+        `  ${formatShortDate(e.timestamp)}  ${e.score}/100  ` +
+          `(${e.pagesScanned} pages; ${c.untitled} untitled, ${c.empty} empty, ` +
+          `${c.stale} stale, ${c.duplicate} duplicate)`
+      );
+    }
+    const trend = formatTrend(entries);
+    if (trend) console.log(`\nTrend: ${trend}`);
     return;
   }
 
@@ -113,6 +162,17 @@ async function main(): Promise<void> {
   const score = scoreWorkspace(findings);
 
   if (command === "scan") {
+    // Record every scan so the score becomes a trend. Local state only -
+    // .gardener-history.jsonl belongs in .gitignore.
+    let trend: string | null = null;
+    try {
+      appendHistory(makeEntry(pages.filter((p) => !p.archived).length, findings, score));
+      trend = formatTrend(readHistory());
+    } catch (err) {
+      process.stderr.write(
+        `Could not write ${HISTORY_FILENAME}: ${err instanceof Error ? err.message : err}\n`
+      );
+    }
     let summaries: ClusterSummary[] = [];
     if (flags.summarize) {
       const config = resolveLlmConfig();
@@ -124,6 +184,7 @@ async function main(): Promise<void> {
     }
     if (flags.json) {
       const report = JSON.parse(renderJson(pages, findings, score));
+      if (trend) report.trend = trend;
       if (summaries.length > 0) {
         report.clusters = summaries.map((c) => ({
           label: c.label,
@@ -134,7 +195,7 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    let out = renderMarkdown(pages, findings, score, flags.staleDays);
+    let out = renderMarkdown(pages, findings, score, flags.staleDays, trend);
     if (summaries.length > 0) {
       out += "\n" + renderClusterMarkdown(summaries).join("\n");
     }
@@ -148,6 +209,46 @@ async function main(): Promise<void> {
     console.log("Nothing to archive. Workspace is in good shape.");
     return;
   }
+
+  const interactive =
+    !flags.yes && (flags.interactive || (process.stdin.isTTY && process.stdout.isTTY));
+
+  if (interactive) {
+    const items = buildWalkthroughItems(plan, findings);
+    console.log(
+      `Walking through ${items.length} pages. Archive or skip each - nothing changes until you pick it.`
+    );
+    const result = await walkthroughPlan(items, makeChooser(flags.interactive));
+    const unprocessed = items.length - result.archive.length - result.skipped.length;
+    console.log(
+      `\n${result.archive.length} to archive, ${result.skipped.length} skipped` +
+        (result.completed ? "" : `, ${unprocessed} not reviewed (quit early)`)
+    );
+    if (result.archive.length === 0) {
+      console.log("Nothing selected. Workspace unchanged.");
+      return;
+    }
+    const applied = await applyArchives(token, result.archive, (done, total) =>
+      process.stderr.write(`\rArchiving… ${done}/${total}`)
+    );
+    process.stderr.write("\n");
+    console.log(`Archived ${applied.archived.length} pages.`);
+    if (applied.failed.length > 0) {
+      console.log(`Failed to archive ${applied.failed.length}:`);
+      for (const f of applied.failed) {
+        console.log(`- ${f.page.url} — ${f.error}`);
+      }
+      process.exit(1);
+    }
+    if (result.skipped.length > 0) {
+      console.log(`\nSkipped ${result.skipped.length} (left in place):`);
+      for (const p of result.skipped) {
+        console.log(`- ${p.title.trim() || "(untitled)"} — ${p.url}`);
+      }
+    }
+    return;
+  }
+
   console.log(`Archive plan (${plan.length} pages):`);
   for (const page of plan) {
     console.log(`- ${page.title.trim() || "(untitled)"} — ${page.url}`);

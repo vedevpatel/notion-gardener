@@ -38,7 +38,8 @@ export function renderMarkdown(
   pages: PageRecord[],
   findings: Finding[],
   score: number,
-  staleDays: number
+  staleDays: number,
+  trend?: string | null
 ): string {
   const active = pages.filter((p) => !p.archived);
   const lines: string[] = [];
@@ -46,6 +47,7 @@ export function renderMarkdown(
   lines.push("");
   lines.push(`- Pages scanned: ${active.length} active, ${pages.length - active.length} archived`);
   lines.push(`- Hygiene score: **${score}/100**`);
+  if (trend) lines.push(`- Trend: ${trend}`);
   lines.push(`- Findings: ${findings.length}`);
   lines.push("");
 
