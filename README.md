@@ -1,6 +1,7 @@
 # notion-gardener
 
 [![CI](https://github.com/vedevpatel/notion-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/vedevpatel/notion-gardener/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/notion-gardener)](https://www.npmjs.com/package/notion-gardener)
 
 Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit next to the actual source of truth, and nobody can tell what's current. notion-gardener audits a workspace through the Notion API, scores its hygiene, and cleans up the dead weight — with your sign-off before anything gets archived.
 
@@ -19,17 +20,22 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 
 ## Setup
 
+```bash
+npx notion-gardener scan        # zero install
+# or: npm install -g notion-gardener
+```
+
 1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy the token.
 2. In Notion, share the top-level pages you want audited with the integration. Notion only shows an integration what you explicitly share — this is the step everyone forgets.
-3. `cp .env.example .env` and paste your token.
+3. Export the token: `export NOTION_TOKEN=secret_...` (or copy `.env.example` to `.env` and paste it there).
 4. Optional, for cluster summaries: set `OPENAI_API_KEY`. Any OpenAI-compatible endpoint works via `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults to `gpt-4o-mini`). Without a key, `scan --summarize` just prints the plain report.
 
 ## Usage
 
 ```bash
-npm install
+notion-gardener scan            # markdown report to stdout (npx notion-gardener scan without a global install)
 
-npm run scan                 # markdown report to stdout
+# from a clone: npm install, then npm run scan
 npm run scan -- --json       # machine-readable, pipe it wherever
 npm run scan -- --html report.html   # also write a standalone HTML report you can send anyone
 npm run scan -- --stale-days 30

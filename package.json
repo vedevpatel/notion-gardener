@@ -1,21 +1,44 @@
 {
   "name": "notion-gardener",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Audit a Notion workspace for stale, empty, untitled, and duplicate pages. Score its hygiene, then clean it up with your sign-off.",
+  "keywords": [
+    "notion",
+    "notion-api",
+    "audit",
+    "cli",
+    "workspace",
+    "hygiene",
+    "cleanup",
+    "mcp"
+  ],
+  "author": "Ved Patel",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "notion-gardener": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    ".gardener.example.yml"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vedevpatel/notion-gardener.git"
+  },
+  "bugs": "https://github.com/vedevpatel/notion-gardener/issues",
+  "homepage": "https://github.com/vedevpatel/notion-gardener#readme",
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "scan": "tsx src/cli.ts scan",
     "fix": "tsx src/cli.ts fix",
     "test": "vitest run",
-    "serve": "tsx src/integrations/mcp.ts"
-  },
-  "engines": {
-    "node": ">=18"
+    "serve": "tsx src/integrations/mcp.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -28,6 +51,5 @@
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"
-  },
-  "license": "MIT"
+  }
 }
