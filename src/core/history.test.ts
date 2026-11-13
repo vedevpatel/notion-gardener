@@ -47,14 +47,32 @@ function entry(score: number, timestamp: string): HistoryEntry {
     timestamp,
     score,
     pagesScanned: 10,
-    counts: { untitled: 1, empty: 2, stale: 3, duplicate: 4 },
+    counts: {
+      untitled: 1,
+      empty: 2,
+      stale: 3,
+      duplicate: 4,
+      orphan: 0,
+      dead_link: 0,
+      empty_database: 0,
+      hollow: 0,
+    },
   };
 }
 
 describe("countByKind", () => {
   it("counts every kind, defaulting missing kinds to zero", () => {
     const counts = countByKind([finding("stale"), finding("stale"), finding("untitled")]);
-    expect(counts).toEqual({ untitled: 1, empty: 0, stale: 2, duplicate: 0 });
+    expect(counts).toEqual({
+      untitled: 1,
+      empty: 0,
+      stale: 2,
+      duplicate: 0,
+      orphan: 0,
+      dead_link: 0,
+      empty_database: 0,
+      hollow: 0,
+    });
   });
 });
 
@@ -88,6 +106,28 @@ describe("appendHistory + readHistory", () => {
     const entries = readHistory(dir);
     expect(entries.map((e) => e.score)).toEqual([67, 94]);
   });
+
+  it("reads entries from before the newer detectors, filling missing kinds with zero", () => {
+    const old = {
+      timestamp: "2026-11-01T12:00:00",
+      score: 67,
+      pagesScanned: 10,
+      counts: { untitled: 1, empty: 2, stale: 3, duplicate: 4 },
+    };
+    writeFileSync(historyPath(dir), JSON.stringify(old) + "\n", "utf8");
+    const entries = readHistory(dir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].counts).toEqual({
+      untitled: 1,
+      empty: 2,
+      stale: 3,
+      duplicate: 4,
+      orphan: 0,
+      dead_link: 0,
+      empty_database: 0,
+      hollow: 0,
+    });
+  });
 });
 
 describe("makeEntry", () => {
@@ -97,7 +137,16 @@ describe("makeEntry", () => {
     expect(e.timestamp).toBe(now.toISOString());
     expect(e.score).toBe(92);
     expect(e.pagesScanned).toBe(14);
-    expect(e.counts).toEqual({ untitled: 0, empty: 1, stale: 1, duplicate: 0 });
+    expect(e.counts).toEqual({
+      untitled: 0,
+      empty: 1,
+      stale: 1,
+      duplicate: 0,
+      orphan: 0,
+      dead_link: 0,
+      empty_database: 0,
+      hollow: 0,
+    });
   });
 });
 

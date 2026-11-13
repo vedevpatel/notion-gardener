@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import readline from "node:readline/promises";
-import { detectFindings, DEFAULT_STALE_DAYS } from "./core/detectors.js";
-import { fetchWorkspacePages } from "./integrations/notion.js";
-import { renderJson, renderMarkdown, scoreWorkspace } from "./core/report.js";
+import { DEFAULT_STALE_DAYS } from "./core/detectors.js";
+import { auditWorkspace, type AuditPhase } from "./integrations/audit.js";
+import { renderJson, renderMarkdown } from "./core/report.js";
 import { applyArchives, planArchives } from "./core/fix.js";
 import {
   appendHistory,
@@ -87,16 +87,20 @@ Usage:
   notion-gardener serve
 
 Commands:
-  scan     Audit the workspace and print a hygiene report. Every scan is
-           appended to ${HISTORY_FILENAME} in the current directory, so the
-           report can show how the score is trending.
-  fix      Archive untitled and empty pages. In a terminal this walks you
-           through the plan page by page - archive or skip each with the
-           arrow keys (a/s work too), enter confirms, q quits. Nothing is
-           archived that you didn't pick. Non-interactively (piped, or with
-           --yes) it's a dry run unless --apply is given, and --apply asks
-           for confirmation before changing anything.
-           Duplicates are reported but never auto-archived.
+  scan     Audit the workspace and print a hygiene report: untitled, empty,
+           stale and duplicate pages, plus orphaned pages (nothing links to
+           them), dead external links, empty databases, and hollow pages
+           (no content, just comments). Every scan is appended to
+           ${HISTORY_FILENAME} in the current directory, so the report can
+           show how the score is trending.
+  fix      Archive untitled, empty and orphaned pages. In a terminal this
+           walks you through the plan page by page - archive or skip each
+           with the arrow keys (a/s work too), enter confirms, q quits.
+           Nothing is archived that you didn't pick. Non-interactively
+           (piped, or with --yes) it's a dry run unless --apply is given,
+           and --apply asks for confirmation before changing anything.
+           Duplicates, dead links, hollow pages and empty databases are
+           reported but never auto-archived.
   history  Print recent scores from ${HISTORY_FILENAME}.
   serve    Run as an MCP server over stdio, so an agent (Claude, Cursor) can
            run the audit itself.
@@ -138,7 +142,8 @@ async function main(): Promise<void> {
       console.log(
         `  ${formatShortDate(e.timestamp)}  ${e.score}/100  ` +
           `(${e.pagesScanned} pages; ${c.untitled} untitled, ${c.empty} empty, ` +
-          `${c.stale} stale, ${c.duplicate} duplicate)`
+          `${c.stale} stale, ${c.duplicate} duplicate, ${c.orphan} orphan, ` +
+          `${c.dead_link} dead link, ${c.empty_database} empty db, ${c.hollow} hollow)`
       );
     }
     const trend = formatTrend(entries);
@@ -153,13 +158,25 @@ async function main(): Promise<void> {
   }
 
   const token = resolveToken(flags);
-  const pages = await fetchWorkspacePages(token, (done, total) =>
-    process.stderr.write(`\rChecking page content… ${done}/${total}`)
+  const phaseLabels: Record<AuditPhase, string> = {
+    content: "Reading page content",
+    databases: "Checking databases",
+    comments: "Checking comments",
+    links: "Checking external links",
+  };
+  const audit = await auditWorkspace(token, {
+    staleDays: flags.staleDays,
+    // Dead links never feed the archive plan, so fix skips the HTTP checks.
+    checkExternalLinks: command === "scan",
+    onProgress: (phase, done, total) =>
+      process.stderr.write(`\r${phaseLabels[phase]}… ${done}/${total}`),
+  });
+  process.stderr.write(
+    `\rScanned ${audit.pages.length} pages and ${audit.databases.length} databases.\n`
   );
-  process.stderr.write(`\rScanned ${pages.length} pages.\n`);
+  for (const warning of audit.warnings) process.stderr.write(`${warning}\n`);
 
-  const findings = detectFindings(pages, { staleDays: flags.staleDays });
-  const score = scoreWorkspace(findings);
+  const { pages, findings, score } = audit;
 
   if (command === "scan") {
     // Record every scan so the score becomes a trend. Local state only -

@@ -16,14 +16,23 @@ export interface HistoryEntry {
 
 export const HISTORY_FILENAME = ".gardener-history.jsonl";
 
-const KINDS: FindingKind[] = ["untitled", "empty", "stale", "duplicate"];
+const KINDS: FindingKind[] = [
+  "untitled",
+  "empty",
+  "stale",
+  "duplicate",
+  "orphan",
+  "dead_link",
+  "empty_database",
+  "hollow",
+];
 
 export function historyPath(dir: string = process.cwd()): string {
   return join(dir, HISTORY_FILENAME);
 }
 
 export function countByKind(findings: Finding[]): Record<FindingKind, number> {
-  const counts = { untitled: 0, empty: 0, stale: 0, duplicate: 0 } as Record<FindingKind, number>;
+  const counts = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<FindingKind, number>;
   for (const f of findings) counts[f.kind]++;
   return counts;
 }
@@ -61,9 +70,19 @@ export function readHistory(dir: string = process.cwd()): HistoryEntry[] {
         typeof parsed.score === "number" &&
         typeof parsed.pagesScanned === "number" &&
         parsed.counts !== undefined &&
-        KINDS.every((k) => typeof parsed.counts?.[k] === "number")
+        typeof parsed.counts === "object"
       ) {
-        entries.push(parsed as HistoryEntry);
+        // Entries written before a finding kind existed stay valid: the
+        // missing kinds just read as zero.
+        const counts = Object.fromEntries(
+          KINDS.map((k) => [k, typeof parsed.counts?.[k] === "number" ? parsed.counts[k] : 0])
+        ) as Record<FindingKind, number>;
+        entries.push({
+          timestamp: parsed.timestamp,
+          score: parsed.score,
+          pagesScanned: parsed.pagesScanned,
+          counts,
+        });
       }
     } catch {
       // skip the line

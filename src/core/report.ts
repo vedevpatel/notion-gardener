@@ -8,6 +8,12 @@ import type { Finding, FindingKind, PageRecord } from "./detectors.js";
  *   empty:    3 each, capped at 20
  *   stale:    1 each, capped at 30
  *   duplicate: 2 each, capped at 25
+ *   orphan:   2 each, capped at 20
+ *   dead_link: 1 each, capped at 10
+ *   empty_database: 2 each, capped at 10
+ *   hollow:   1 each, capped at 5
+ * Dead links and hollow pages dent the score less than stale/duplicate:
+ * they're pointers to rot, not rot themselves.
  */
 export function scoreWorkspace(findings: Finding[]): number {
   const weights: Record<FindingKind, { each: number; cap: number }> = {
@@ -15,6 +21,10 @@ export function scoreWorkspace(findings: Finding[]): number {
     empty: { each: 3, cap: 20 },
     stale: { each: 1, cap: 30 },
     duplicate: { each: 2, cap: 25 },
+    orphan: { each: 2, cap: 20 },
+    dead_link: { each: 1, cap: 10 },
+    empty_database: { each: 2, cap: 10 },
+    hollow: { each: 1, cap: 5 },
   };
   let penalty = 0;
   for (const kind of Object.keys(weights) as FindingKind[]) {
@@ -30,6 +40,10 @@ const KIND_HEADINGS: Record<FindingKind, string> = {
   empty: "Empty pages",
   stale: "Stale pages",
   duplicate: "Duplicate titles",
+  orphan: "Orphaned pages",
+  dead_link: "Dead links",
+  empty_database: "Empty databases",
+  hollow: "Hollow pages",
 };
 
 const LIST_LIMIT = 25;

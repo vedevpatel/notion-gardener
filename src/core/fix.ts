@@ -8,11 +8,14 @@ export interface FixOptions {
 }
 
 /**
- * Picks the pages an archive run would touch. Duplicates are never
- * auto-archived: which copy is the real one is a human's call.
+ * Picks the pages an archive run would touch. Duplicates, dead links,
+ * hollow pages and empty databases are never auto-archived: which copy
+ * of a duplicate is real is a human's call, dead links and hollow pages
+ * are flags for judgment (the comments may matter), and databases can't
+ * be archived through the pages API anyway.
  */
 export function planArchives(findings: Finding[], opts: FixOptions): PageRecord[] {
-  const kinds: Finding["kind"][] = ["untitled", "empty"];
+  const kinds: Finding["kind"][] = ["untitled", "empty", "orphan"];
   if (opts.includeStale) kinds.push("stale");
   return affectedPages(findings.filter((f) => kinds.includes(f.kind)));
 }

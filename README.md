@@ -6,13 +6,13 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 
 ## What it does
 
-- Scans every page your integration can see, via the Notion search API
-- Flags four kinds of rot: **untitled** pages, **empty** pages, **stale** pages (no edits in 90 days, configurable), and **duplicate** titles
+- Scans every page and database your integration can see, via the Notion search API
+- Flags eight kinds of rot: **untitled** pages, **empty** pages, **stale** pages (no edits in 90 days, configurable), **duplicate** titles, **orphaned** pages (nothing links to or mentions them — being a child in the sidebar tree doesn't count as a link), **dead links** (external URLs that return 404/410), **empty databases** (zero rows), and **hollow** pages (no content left, but an active comment thread)
 - Scores the workspace 0–100 and prints a markdown or JSON report
 - Optionally groups stale and duplicate findings into clusters and summarizes each cluster with an LLM, so "keep or kill" becomes a 30-second decision
 - Runs as an MCP server, so an agent in Claude or Cursor can run the audit itself
 - `fix` walks you through the plan page by page in a terminal — archive or skip each with the arrow keys, and only what you pick gets archived. Piped or scripted runs stay dry-run unless `--apply` is passed
-- Duplicates are reported but never auto-archived. Which copy is the real one is a human's call.
+- Duplicates are reported but never auto-archived. Which copy is the real one is a human's call. Dead links, hollow pages and empty databases are also flags only — read the comments, click the links, then decide.
 - Every scan is recorded in a local `.gardener-history.jsonl`, so the report shows the score's trend (`67 -> 94, +27 since Nov 12`) and `history` prints recent runs
 
 ## Setup
@@ -71,13 +71,15 @@ Archiving is reversible in Notion (they land in Trash), but the tool still treat
 src/
   cli.ts                 # entry point: scan, fix, history, serve (prompt layer lives here)
   core/
-    detectors.ts         # pure finding detection over page records
+    detectors.ts         # pure finding detection over page records (all eight kinds)
     report.ts            # hygiene score + markdown/JSON rendering
     fix.ts               # archive planning and confirmation flow
     interactive.ts       # page-by-page fix walkthrough (decision flow, prompt-agnostic)
     history.ts           # score history: append/read .gardener-history.jsonl, trend line
   integrations/
-    notion.ts            # Notion API client
+    audit.ts             # the full pipeline: fetch, link graph, detectors, score
+    notion.ts            # Notion API client: pages, blocks, databases, comments
+    linkcheck.ts         # external link checker (HEAD with GET fallback, dead = 404/410 only)
     prompt.ts            # interactive fix picker (arrow keys, line fallback)
     summarize.ts         # LLM cluster summaries (optional, keyless no-op)
     mcp.ts               # MCP server over stdio
@@ -95,8 +97,18 @@ Tests sit next to what they cover (`*.test.ts`).
 | Empty page | 3 | 20 |
 | Stale page | 1 | 30 |
 | Duplicate title | 2 | 25 |
+| Orphaned page | 2 | 20 |
+| Dead link | 1 | 10 |
+| Empty database | 2 | 10 |
+| Hollow page | 1 | 5 |
 
-An "empty" page is one with no content blocks and no subpages. The scanner checks this with one lightweight `blocks.children.list` call per page (three at a time, to stay inside Notion's rate limit), so the content check is real rather than guessed from titles.
+An "empty" page is one with no content blocks and no subpages. The scanner reads every page's top-level blocks (three at a time, to stay inside Notion's rate limit), so the content check is real rather than guessed from titles — and the same pass builds the link graph the other detectors run on.
+
+An "orphaned" page is one nothing else in the workspace links to or mentions. Workspace roots and database rows are exempt (people reach those directly); what's left is pages whose only path in is the sidebar tree, which is containment, not a link. Orphans can join the `fix` archive plan.
+
+A "dead link" is an external URL in page content that returns 404 or 410. The checker tries HEAD and falls back to GET, with a short timeout and bounded concurrency. Anything inconclusive — timeouts, 403 bot walls, 5xx, a flaky network — counts as unknown and is never flagged. Notion-internal links are tracked as page references instead, and media files are skipped (Notion-hosted files use expiring signed URLs).
+
+A "hollow" page has no content but has comments — the page died and the discussion survived. It needs the integration to have comment access; without it, the scan says so and skips the check rather than guessing.
 
 ## Why I built it
 
@@ -104,7 +116,7 @@ Every team I've worked in treats Notion as the system of record and then lets it
 
 ## Roadmap
 
-Shipped: interactive fix walkthrough, score history with trends, LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
+Shipped: interactive fix walkthrough, score history with trends, smarter detectors (orphaned pages, dead links, empty databases, hollow pages), LLM summaries of stale clusters (`scan --summarize`), and MCP server mode (`serve`).
 
 - Scheduled sweeps with a Slack digest of the report
 - `fix` suggestions driven by the cluster summaries (archive these, keep those)
@@ -116,6 +128,6 @@ Shipped: interactive fix walkthrough, score history with trends, LLM summaries o
 npm test
 ```
 
-The detectors are pure functions over plain page records, so the whole detection pass is covered without touching the API.
+The detectors are pure functions over plain page records, and the Notion layer takes a structural client interface, so the whole pipeline — detection, link extraction, link checking, database and comment scans — is covered without touching the network.
 
 MIT license.

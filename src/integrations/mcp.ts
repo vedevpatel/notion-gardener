@@ -2,9 +2,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { detectFindings, DEFAULT_STALE_DAYS, type FindingKind } from "../core/detectors.js";
-import { fetchWorkspacePages } from "./notion.js";
-import { renderJson, renderMarkdown, scoreWorkspace } from "../core/report.js";
+import { DEFAULT_STALE_DAYS, type FindingKind } from "../core/detectors.js";
+import { auditWorkspace } from "./audit.js";
+import { renderJson, renderMarkdown } from "../core/report.js";
 
 function requireToken(): string {
   const token = process.env.NOTION_TOKEN;
@@ -26,7 +26,7 @@ export function createServer(): McpServer {
     {
       title: "Audit workspace",
       description:
-        "Scan the connected Notion workspace for stale, empty, untitled and duplicate pages, and return the full hygiene report.",
+        "Scan the connected Notion workspace for stale, empty, untitled, duplicate and orphaned pages, dead links, empty databases and hollow pages, and return the full hygiene report.",
       inputSchema: {
         staleDays: z.number().int().positive().optional(),
         format: z.enum(["markdown", "json"]).optional(),
@@ -34,13 +34,11 @@ export function createServer(): McpServer {
     },
     async ({ staleDays, format }) => {
       const days = staleDays ?? DEFAULT_STALE_DAYS;
-      const pages = await fetchWorkspacePages(requireToken());
-      const findings = detectFindings(pages, { staleDays: days });
-      const score = scoreWorkspace(findings);
+      const audit = await auditWorkspace(requireToken(), { staleDays: days });
       const text =
         format === "json"
-          ? renderJson(pages, findings, score)
-          : renderMarkdown(pages, findings, score, days);
+          ? renderJson(audit.pages, audit.findings, audit.score)
+          : renderMarkdown(audit.pages, audit.findings, audit.score, days);
       return { content: [{ type: "text", text }] };
     }
   );
@@ -56,15 +54,14 @@ export function createServer(): McpServer {
       },
     },
     async ({ staleDays }) => {
-      const pages = await fetchWorkspacePages(requireToken());
-      const findings = detectFindings(pages, { staleDays });
+      const audit = await auditWorkspace(requireToken(), { staleDays });
       const byKind: Partial<Record<FindingKind, number>> = {};
-      for (const f of findings) {
+      for (const f of audit.findings) {
         byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
       }
       const text = JSON.stringify({
-        score: scoreWorkspace(findings),
-        pagesScanned: pages.filter((p) => !p.archived).length,
+        score: audit.score,
+        pagesScanned: audit.pages.filter((p) => !p.archived).length,
         findings: byKind,
       });
       return { content: [{ type: "text", text }] };
