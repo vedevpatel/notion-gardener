@@ -197,3 +197,27 @@ describe("CLI config handling (no network reached)", () => {
     expect(r.stderr).toMatch(/--stale-days needs a positive number/);
   });
 });
+
+describe("parseConfig token key", () => {
+  it("reads and trims a token", () => {
+    expect(parseConfig('token: "secret_abc"\n').token).toBe("secret_abc");
+  });
+
+  it("leaves token undefined when absent", () => {
+    expect(parseConfig("staleDays: 30\n").token).toBeUndefined();
+  });
+
+  it("rejects non-string and empty tokens", () => {
+    expect(() => parseConfig("token: 123\n")).toThrow(/token must be a non-empty string/);
+    expect(() => parseConfig("token: ''\n")).toThrow(/token must be a non-empty string/);
+    expect(() => parseConfig("token: [a]\n")).toThrow(/token must be a non-empty string/);
+  });
+
+  it("treats a bare 'token:' key as absent", () => {
+    expect(parseConfig("token:\n").token).toBeUndefined();
+  });
+
+  it("still names token in the allowed-keys error", () => {
+    expect(() => parseConfig("tokn: x\n")).toThrow(/unknown key "tokn"/);
+  });
+});

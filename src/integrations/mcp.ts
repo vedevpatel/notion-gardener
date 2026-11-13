@@ -4,16 +4,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { type FindingKind } from "../core/detectors.js";
 import { auditWorkspace } from "./audit.js";
-import { loadConfig } from "../core/config.js";
+import { loadConfig, type GardenerConfig } from "../core/config.js";
+import { resolveToken } from "../core/env.js";
 import { renderJson, renderMarkdown } from "../core/report.js";
 
-function requireToken(): string {
-  const token = process.env.NOTION_TOKEN;
+function requireToken(config: GardenerConfig): string {
+  const token = resolveToken({ env: process.env, configToken: config.token });
   if (!token) {
     throw new Error(
       "NOTION_TOKEN is not set. Create an internal integration at " +
         "https://www.notion.so/my-integrations, share pages with it, and " +
-        "pass the token in the server's env."
+        "pass the token in the server's env (or run `notion-gardener init`)."
     );
   }
   return token;
@@ -35,7 +36,7 @@ export function createServer(): McpServer {
     },
     async ({ staleDays, format }) => {
       const config = loadConfig(process.env.GARDENER_CONFIG);
-      const audit = await auditWorkspace(requireToken(), { staleDays, config });
+      const audit = await auditWorkspace(requireToken(config), { staleDays, config });
       const days = audit.staleDays;
       const text =
         format === "json"
@@ -65,7 +66,7 @@ export function createServer(): McpServer {
     },
     async ({ staleDays }) => {
       const config = loadConfig(process.env.GARDENER_CONFIG);
-      const audit = await auditWorkspace(requireToken(), { staleDays, config });
+      const audit = await auditWorkspace(requireToken(config), { staleDays, config });
       const byKind: Partial<Record<FindingKind, number>> = {};
       for (const f of audit.findings) {
         byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;

@@ -18,6 +18,9 @@ export const CONFIG_FILENAME = ".gardener.yml";
  * - ignore: pages whose findings are dropped from the report, the score
  *   and the fix plan. Unlike protected pages they are analyzed normally,
  *   so an ignored page still counts as a duplicate twin of another page.
+ * - token: the Notion integration token. Last in the precedence order
+ *   (--token flag, NOTION_TOKEN env, .env, then this), so it's a fallback,
+ *   not an override.
  *
  * Both lists take Notion page/database IDs (32 hex characters, dashes
  * optional) or title patterns (case-insensitive, whole title, `*` matches
@@ -27,11 +30,12 @@ export interface GardenerConfig {
   staleDays?: number;
   protectedPages: string[];
   ignore: string[];
+  token?: string;
 }
 
 export const EMPTY_CONFIG: GardenerConfig = { protectedPages: [], ignore: [] };
 
-const KNOWN_KEYS = ["staleDays", "protectedPages", "ignore"] as const;
+const KNOWN_KEYS = ["staleDays", "protectedPages", "ignore", "token"] as const;
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -65,6 +69,13 @@ export function parseConfig(text: string, source = CONFIG_FILENAME): GardenerCon
   }
 
   const config: GardenerConfig = { protectedPages: [], ignore: [] };
+
+  if (obj.token !== undefined && obj.token !== null) {
+    if (typeof obj.token !== "string" || !obj.token.trim()) {
+      throw new ConfigError(`${source}: token must be a non-empty string`);
+    }
+    config.token = obj.token.trim();
+  }
 
   if (obj.staleDays !== undefined) {
     const v = obj.staleDays;

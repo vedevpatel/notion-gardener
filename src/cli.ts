@@ -91,19 +91,6 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
   return { command, flags };
 }
 
-function resolveToken(flags: Flags): string {
-  const token = flags.token ?? process.env.NOTION_TOKEN;
-  if (!token) {
-    console.error(
-      "No Notion token. Set NOTION_TOKEN (see .env.example) or pass --token.\n" +
-        "Create an internal integration at https://www.notion.so/my-integrations " +
-        "and share the pages you want audited with it."
-    );
-    process.exit(1);
-  }
-  return token;
-}
-
 const HELP = `notion-gardener — audit and clean up a Notion workspace
 
 Usage:
@@ -113,6 +100,10 @@ Usage:
   notion-gardener serve
 
 Commands:
+  init     Set up your Notion token: create the integration, verify the token,
+           save it (.env or .gardener.yml, your pick) and check which pages
+           the integration can see. Running scan with no token offers the
+           same setup.
   scan     Audit the workspace and print a hygiene report: untitled, empty,
            stale and duplicate pages, plus orphaned pages (nothing links to
            them), dead external links, empty databases, and hollow pages
@@ -148,7 +139,9 @@ Flags:
   --include-stale   Let fix also archive stale pages
   --interactive     Force the page-by-page fix walkthrough, even when piped
   --yes             Skip the walkthrough and keep the scripted plan/confirm flow
-  --token TOKEN     Notion integration token (or set NOTION_TOKEN)
+  --token TOKEN     Notion integration token. Precedence: --token, then
+                    NOTION_TOKEN, then ./.env (auto-loaded), then the token
+                    key in .gardener.yml. The init command saves it for you.
 `;
 
 async function main(): Promise<void> {
@@ -156,6 +149,13 @@ async function main(): Promise<void> {
 
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP);
+    return;
+  }
+
+  if (command === "init") {
+    const { runInit, makeConsoleIO, makeNotionDeps } = await import("./integrations/init.js");
+    const result = await runInit(makeConsoleIO(), makeNotionDeps());
+    if (!result) process.exit(1);
     return;
   }
 
@@ -197,7 +197,6 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const token = resolveToken(flags);
   let config;
   try {
     config = loadConfig(flags.config);
@@ -207,6 +206,19 @@ async function main(): Promise<void> {
       process.exit(2);
     }
     throw err;
+  }
+  const { ensureToken, makeConsoleIO, makeNotionDeps } = await import("./integrations/init.js");
+  const token = await ensureToken(flags.token, makeConsoleIO(), {
+    ...makeNotionDeps(),
+    isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    configToken: config.token,
+  });
+  if (!token) {
+    console.error(
+      "No Notion token. Run 'notion-gardener init' to set one up (two minutes),\n" +
+        "or set NOTION_TOKEN / pass --token."
+    );
+    process.exit(1);
   }
   const phaseLabels: Record<AuditPhase, string> = {
     content: "Reading page content",

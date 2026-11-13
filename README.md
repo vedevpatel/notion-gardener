@@ -27,14 +27,21 @@ Nothing is ever auto-archived. Duplicates, dead links, hollow pages and empty da
 
 ## Setup
 
-1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy the token.
-2. In Notion, share the top-level pages you want audited with the integration. Notion only shows an integration what you explicitly share — this is the step everyone forgets.
-3. Export the token: `export NOTION_TOKEN=secret_...` (or copy `.env.example` to `.env` and paste it there).
-4. Optional, for cluster summaries: set `OPENAI_API_KEY`. Any OpenAI-compatible endpoint works via `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults to `gpt-4o-mini`). Without a key, `scan --summarize` just prints the plain report.
+Two minutes, guided:
+
+```bash
+npx notion-gardener init
+```
+
+The wizard walks you through creating an integration at [notion.so/my-integrations](https://www.notion.so/my-integrations), checks the token against the Notion API, saves it so you never paste it again (a git-ignored `.env`, or `.gardener.yml` — your pick), and shows you which pages the integration can see, with the exact share steps if it can't see anything yet. Running `scan` with no token offers the same wizard. (The demo GIF above predates `init` — setup is one command now.)
+
+**Manual setup (CI and scripts):** create an internal integration, share pages with it, and give the tool the token. Precedence: `--token` flag, then `NOTION_TOKEN`, then `./.env` (auto-loaded), then the `token:` key in `.gardener.yml`. Optional, for cluster summaries: set `OPENAI_API_KEY`. Any OpenAI-compatible endpoint works via `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults to `gpt-4o-mini`). Without a key, `scan --summarize` just prints the plain report.
 
 ## Usage
 
 ```bash
+npx notion-gardener init        # first time: guided token setup, then you're set
+
 notion-gardener scan            # markdown report to stdout
 
 # from a clone: npm install, then npm run scan
@@ -84,6 +91,7 @@ ignore:
 | `staleDays` | positive integer | Days without an edit before a page is stale. Precedence: `--stale-days` flag, then this, then the `STALE_DAYS` env var, then 90. |
 | `protectedPages` | list of strings | Pages the tool never touches. |
 | `ignore` | list of strings | Pages whose findings are dropped. |
+| `token` | string | Notion integration token. Lowest precedence — `--token`, `NOTION_TOKEN` and `./.env` all win. Keep this file out of git if you use it. |
 
 Entries are IDs (32 hex characters, dashes optional) or title patterns. Titles match the whole title, case-insensitively, with `*` as a wildcard; `Wiki` does not match `Wiki 2025` but `Wiki*` does. Quote anything YAML could read as a number.
 

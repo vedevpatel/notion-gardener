@@ -5,6 +5,12 @@
 # The --stale-days flag wins over this.
 staleDays: 60
 
+# Notion integration token. Lowest precedence: the --token flag,
+# NOTION_TOKEN and ./.env all win over this. Easiest is `notion-gardener
+# init`, which saves the token for you. If you keep it here, keep this
+# file out of git.
+#token: "secret_your_token_here"
+
 # Pages the tool never touches: no findings from any detector, no part in
 # duplicate grouping, and refused again by `fix`. They still count as link
 # sources, so a protected index page keeps its targets from looking orphaned.

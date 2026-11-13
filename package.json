@@ -1,6 +1,6 @@
 {
   "name": "notion-gardener",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Audit a Notion workspace for stale, empty, untitled, and duplicate pages. Score its hygiene, then clean it up with your sign-off.",
   "keywords": [
     "notion",
