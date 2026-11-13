@@ -4,11 +4,19 @@ import { detectFindings, DEFAULT_STALE_DAYS } from "./detectors.js";
 import { fetchWorkspacePages } from "./notion.js";
 import { renderJson, renderMarkdown, scoreWorkspace } from "./report.js";
 import { applyArchives, planArchives } from "./fix.js";
+import {
+  clusterFindings,
+  renderClusterMarkdown,
+  resolveLlmConfig,
+  summarizeClusters,
+  type ClusterSummary,
+} from "./summarize.js";
 
 interface Flags {
   json: boolean;
   apply: boolean;
   includeStale: boolean;
+  summarize: boolean;
   token?: string;
   staleDays: number;
 }
@@ -19,6 +27,7 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     json: false,
     apply: false,
     includeStale: false,
+    summarize: false,
     staleDays: Number(process.env.STALE_DAYS) || DEFAULT_STALE_DAYS,
   };
   for (let i = 0; i < rest.length; i++) {
@@ -26,6 +35,7 @@ function parseArgs(argv: string[]): { command: string; flags: Flags } {
     if (arg === "--json") flags.json = true;
     else if (arg === "--apply") flags.apply = true;
     else if (arg === "--include-stale") flags.includeStale = true;
+    else if (arg === "--summarize") flags.summarize = true;
     else if (arg === "--token") flags.token = rest[++i];
     else if (arg === "--stale-days") flags.staleDays = Number(rest[++i]);
     else {
@@ -52,17 +62,22 @@ function resolveToken(flags: Flags): string {
 const HELP = `notion-gardener — audit and clean up a Notion workspace
 
 Usage:
-  notion-gardener scan [--json] [--stale-days N]
+  notion-gardener scan [--json] [--summarize] [--stale-days N]
   notion-gardener fix  [--apply] [--include-stale] [--stale-days N]
+  notion-gardener serve
 
 Commands:
   scan   Audit the workspace and print a hygiene report.
   fix    Archive untitled and empty pages. Dry-run unless --apply is given;
          --apply always asks for confirmation before changing anything.
          Duplicates are reported but never auto-archived.
+  serve  Run as an MCP server over stdio, so an agent (Claude, Cursor) can
+         run the audit itself.
 
 Flags:
   --json            Machine-readable report (scan only)
+  --summarize       Add LLM summaries of stale/duplicate clusters (scan only;
+                    needs OPENAI_API_KEY, silently skipped without one)
   --stale-days N    Days without an edit before a page counts as stale (default ${DEFAULT_STALE_DAYS})
   --include-stale   Let fix also archive stale pages
   --token TOKEN     Notion integration token (or set NOTION_TOKEN)
@@ -73,6 +88,12 @@ async function main(): Promise<void> {
 
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP);
+    return;
+  }
+
+  if (command === "serve") {
+    const { serve } = await import("./mcp.js");
+    await serve();
     return;
   }
 
@@ -92,11 +113,32 @@ async function main(): Promise<void> {
   const score = scoreWorkspace(findings);
 
   if (command === "scan") {
-    console.log(
-      flags.json
-        ? renderJson(pages, findings, score)
-        : renderMarkdown(pages, findings, score, flags.staleDays)
-    );
+    let summaries: ClusterSummary[] = [];
+    if (flags.summarize) {
+      const config = resolveLlmConfig();
+      if (config) {
+        summaries = await summarizeClusters(clusterFindings(findings), config);
+      } else {
+        process.stderr.write("No OPENAI_API_KEY set - printing the plain report.\n");
+      }
+    }
+    if (flags.json) {
+      const report = JSON.parse(renderJson(pages, findings, score));
+      if (summaries.length > 0) {
+        report.clusters = summaries.map((c) => ({
+          label: c.label,
+          summary: c.summary ?? null,
+          findings: c.findings.length,
+        }));
+      }
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    let out = renderMarkdown(pages, findings, score, flags.staleDays);
+    if (summaries.length > 0) {
+      out += "\n" + renderClusterMarkdown(summaries).join("\n");
+    }
+    console.log(out);
     return;
   }
 

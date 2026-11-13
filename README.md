@@ -7,6 +7,8 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 - Scans every page your integration can see, via the Notion search API
 - Flags four kinds of rot: **untitled** pages, **empty** pages, **stale** pages (no edits in 90 days, configurable), and **duplicate** titles
 - Scores the workspace 0–100 and prints a markdown or JSON report
+- Optionally groups stale and duplicate findings into clusters and summarizes each cluster with an LLM, so "keep or kill" becomes a 30-second decision
+- Runs as an MCP server, so an agent in Claude or Cursor can run the audit itself
 - `fix` archives the untitled and empty pages — dry-run by default, and `--apply` still asks you to confirm before anything changes
 - Duplicates are reported but never auto-archived. Which copy is the real one is a human's call.
 
@@ -15,6 +17,7 @@ Notion workspaces rot. Untitled pages pile up, notes from eight months ago sit n
 1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy the token.
 2. In Notion, share the top-level pages you want audited with the integration. Notion only shows an integration what you explicitly share — this is the step everyone forgets.
 3. `cp .env.example .env` and paste your token.
+4. Optional, for cluster summaries: set `OPENAI_API_KEY`. Any OpenAI-compatible endpoint works via `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults to `gpt-4o-mini`). Without a key, `scan --summarize` just prints the plain report.
 
 ## Usage
 
@@ -28,6 +31,28 @@ npm run scan -- --stale-days 30
 npm run fix                  # prints the archive plan, changes nothing
 npm run fix -- --apply       # asks for "yes", then archives
 npm run fix -- --apply --include-stale   # also archives stale pages
+
+npm run scan -- --summarize  # adds an LLM-written summary per stale/duplicate cluster
+```
+
+### MCP server mode
+
+```bash
+npm run serve                # stdio MCP server
+```
+
+It exposes two tools: `audit_workspace` (the full report, markdown or JSON) and `get_hygiene_score` (just the score and finding counts). Point a client at it, e.g. in Claude Desktop's config:
+
+```json
+{
+  "mcpServers": {
+    "notion-gardener": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/notion-gardener/mcp.ts"],
+      "env": { "NOTION_TOKEN": "secret_..." }
+    }
+  }
+}
 ```
 
 Archiving is reversible in Notion (they land in Trash), but the tool still treats every change as opt-in.
@@ -51,9 +76,10 @@ Every team I've worked in treats Notion as the system of record and then lets it
 
 ## Roadmap
 
+Shipped: LLM summaries of stale clusters (`scan --summarize`) and MCP server mode (`serve`).
+
 - Scheduled sweeps with a Slack digest of the report
-- An LLM pass that summarizes stale clusters so "keep or kill" becomes a 30-second decision
-- MCP server mode, so an agent can run the audit from Claude or Cursor directly
+- `fix` suggestions driven by the cluster summaries (archive these, keep those)
 
 ## Tests
 
